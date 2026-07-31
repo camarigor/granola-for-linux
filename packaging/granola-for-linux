@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Launcher installed by the .deb package.
+#
+# The package does NOT contain Granola. On first run it asks for the official
+# .dmg (downloaded by the user from granola.ai) and extracts it under $HOME.
+set -euo pipefail
+
+PREFIX=/opt/granola-for-linux
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/granola-for-linux"
+APP="$DATA/app-src"
+
+die() { echo "granola-for-linux: $*" >&2; exit 1; }
+
+# -- first run: needs the .dmg ------------------------------------------------
+if [[ ! -d "$APP" ]]; then
+    DMG="${1:-}"
+    if [[ -z "$DMG" ]]; then
+        # try the obvious locations first
+        DMG=$(ls -t "$HOME"/Downloads/*ranola*.dmg "$HOME"/Downloads/*.dmg 2>/dev/null | head -1 || true)
+    fi
+    [[ -n "$DMG" && -f "$DMG" ]] || die "first run needs the official .dmg:
+    granola-for-linux /caminho/para/'Granola - AI Notepad.dmg'
+  (download it from https://www.granola.ai/download - this package does not ship it)"
+
+    command -v 7z >/dev/null || die "7z missing (apt install p7zip-full)"
+    echo "granola-for-linux: extracting $(basename "$DMG") ..."
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    7z x -y -o"$tmp" "$DMG" 'Granola/Granola.app/Contents/Resources/*' >/dev/null
+    asar="$tmp/Granola/Granola.app/Contents/Resources/app.asar"
+    [[ -f "$asar" ]] || die "app.asar not found - is this really the Granola .dmg?"
+
+    mkdir -p "$DATA"
+    "$PREFIX/electron/resources/app/node_modules/.bin/asar" extract "$asar" "$APP" 2>/dev/null \
+        || "$PREFIX/bin/asar-extract" "$asar" "$APP" \
+        || die "failed to unpack app.asar"
+    echo "granola-for-linux: app extracted to $APP"
+fi
+
+# -- run ----------------------------------------------------------------------
+export GRANOLA_APP_DIR="$APP"
+export GRANOLA_STUB_VERBOSE="${GRANOLA_STUB_VERBOSE:-0}"
+
+exec "$PREFIX/electron/electron" "$PREFIX/stubs/loader.js" \
+    --no-sandbox "${@:2}"

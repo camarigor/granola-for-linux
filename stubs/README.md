@@ -1,18 +1,20 @@
 # Stubs
 
-Substitutos JS para os módulos nativos macOS do Granola. `loader.js` intercepta
-o carregador de `.node` do Node e injeta estes arquivos, assim o bundle
-minificado **não precisa ser editado** (o que quebraria a cada release do app).
+JS replacements for Granola's macOS native modules. `loader.js` hooks Node's
+`.node` loader and injects these, so the minified bundle is **never edited**
+(which would break on every app release).
 
-| Stub | Estratégia |
+| Stub | Strategy |
 |---|---|
-| `granola.js` | **Instrumentado.** Registra toda chamada (método, tipos dos argumentos) e responde a callbacks com "silêncio" para o app seguir o fluxo. É a ferramenta que revela o contrato da captura de áudio para a Fase 2. |
-| `keychain.js` | Implementação real simplificada: arquivo 600 em `~/.config/granola-linux`. Trocar por libsecret depois. |
-| demais | No-op via Proxy: qualquer método retorna `undefined` e loga a chamada. São integrações de SO (Dock, haptics, OCR, automação de reunião) que não afetam gravar/resumir. |
+| `granola.js` | **Instrumented.** Logs every call (method, argument types) and answers callbacks with silence so the app keeps moving. This is the tool that reveals the audio-capture contract for Phase 2. |
+| `keychain.js` | Real, simplified implementation: a 600-mode file under `~/.config/granola-for-linux`. Swap for libsecret later. |
+| `sqlite-updatehook-shim.js` | Adds `updateHook`/`commitHook`/`rollbackHook` to the public better-sqlite3 build, Granola ships a fork that has them. Applied to *our* build, not the app's. |
+| the rest | No-op proxies: any method returns `undefined` and logs the call. These are OS integrations (Dock, haptics, OCR, meeting automation) that do not affect recording. |
 
-Módulos ainda sem stub aparecem no log como `FALTA STUB: <nome>`, o loader
-devolve um objeto que lança erro descritivo em vez de derrubar o app, para que
-uma execução revele tudo que falta de uma vez.
+Modules without a stub appear in the log as `MISSING STUB: <name>`, the loader
+returns an object that throws a descriptive error instead of killing the app, so
+a single run reveals everything that is still missing.
 
-Variáveis: `GRANOLA_STUB_VERBOSE=0` silencia os logs; `GRANOLA_APP_DIR` aponta
-para outro diretório do app extraído.
+Environment: `GRANOLA_STUB_VERBOSE=0` silences logs; `GRANOLA_APP_DIR` points at
+a different extracted app; `GRANOLA_TRACE_PROTOCOL`, `GRANOLA_TRACE_NET` and
+`GRANOLA_TRACE_ERRORS` toggle the tracing hooks.

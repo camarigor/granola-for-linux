@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Mapeia a superfície nativa do app: quais .node existem, contra quais
-# frameworks Apple cada um linka, e quanta lógica por plataforma há no JS.
-# Saída serve de insumo para docs/findings.md e para decidir o que stubar.
+# Map the app's native surface: which .node files exist, which Apple
+# frameworks each links against, and how much platform logic the JS has.
+# Feeds docs/findings.md and the decision of what to stub.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,9 +9,9 @@ WORK="$ROOT/work"
 RES="$WORK/Granola/Granola.app/Contents/Resources"
 MAIN="$WORK/app-src/dist-electron/main/index.js"
 
-[[ -d "$RES" ]] || { echo "ERRO: rode ./scripts/extract.sh primeiro" >&2; exit 1; }
+[[ -d "$RES" ]] || { echo "ERROR: run ./scripts/extract.sh first" >&2; exit 1; }
 
-echo "=== MÓDULOS NATIVOS (.node) ==="
+echo "=== NATIVE MODULES (.node) ==="
 for n in "$RES"/native/*.node; do
     [[ -e "$n" ]] || continue
     fw=$(strings "$n" 2>/dev/null \
@@ -21,20 +21,20 @@ for n in "$RES"/native/*.node; do
 done
 
 echo
-echo "=== LÓGICA POR PLATAFORMA (main process) ==="
+echo "=== PLATFORM LOGIC (main process) ==="
 if [[ -f "$MAIN" ]]; then
-    printf "  process.platform : %s ocorrências\n" "$(grep -oha 'process\.platform' "$MAIN" | wc -l)"
+    printf "  process.platform : %s occurrences\n" "$(grep -oha 'process\.platform' "$MAIN" | wc -l)"
     for p in darwin win32 linux; do
         printf "  %-16s : %s\n" "$p" "$(grep -oha "$p" "$MAIN" | wc -l)"
     done
-    echo "  caminhos native/ referenciados:"
+    echo "  native/ paths referenced:"
     grep -ohaE 'native/[a-z_]+' "$MAIN" | sort -u | sed 's/^/    /'
 else
-    echo "  (main/index.js não encontrado)"
+    echo "  (main/index.js not found)"
 fi
 
 echo
-echo "=== MÓDULOS NATIVOS DE TERCEIROS (asar.unpacked) ==="
+echo "=== THIRD-PARTY NATIVE MODULES (asar.unpacked) ==="
 find "$RES/app.asar.unpacked/node_modules" -maxdepth 2 -name package.json 2>/dev/null \
     | while read -r p; do
         printf "  %s\n" "$(basename "$(dirname "$p")")"

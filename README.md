@@ -1,94 +1,100 @@
-# granola-linux
+# granola-for-linux
 
-Tentativa de rodar o cliente **Granola** (macOS, Electron) no Linux.
+Running the **Granola** client (macOS, Electron) on Linux.
 
-> **Este repositório não contém nenhum código, binário ou recurso do Granola.**
-> O app é proprietário. Os scripts aqui extraem a **sua própria cópia** do `.dmg`
-> oficial, na sua máquina, e aplicam patches locais. Nada do app é redistribuído.
+> **This repository contains no Granola code, binaries or assets.**
+> The app is proprietary. The scripts here extract **your own copy** from the
+> official `.dmg`, on your machine, and patch it at runtime. Nothing from the
+> app is redistributed, and the bundle itself is never modified.
 
-## Por que isso é possível (e onde trava)
+## Why this is feasible (and where it stalls)
 
-O Granola é Electron, então a lógica de produto é JavaScript, que roda em
-qualquer plataforma. O que é específico de macOS são **15 módulos nativos**
-(`.node`, Mach-O, código fechado) em `Contents/Resources/native/`.
+Granola is an Electron app, so the product logic is JavaScript and runs
+anywhere. What is macOS-specific are **15 native modules** (`.node`, Mach-O,
+closed source) under `Contents/Resources/native/`.
 
-Levantamento feito na v7.452.1 (ver `docs/findings.md`):
+Survey of v7.452.1 (see `docs/findings.md`):
 
-| Sinal | Valor | Leitura |
+| Signal | Value | Reading |
 |---|---|---|
-| `process.platform` no main | 229 ocorrências | lógica por plataforma é extensa |
-| strings `darwin` / `win32` / `linux` | 142 / **124** / 19 | **já existe camada Windows**, a arquitetura é multiplataforma |
-| módulos nativos | 15 (todos Mach-O) | precisam de equivalente Linux ou stub |
-| captura de áudio | ScreenCaptureKit + CoreAudio + AVFoundation | é o único item realmente difícil |
+| `process.platform` in main | 229 occurrences | platform-specific logic is extensive |
+| `darwin` / `win32` / `linux` strings | 142 / **124** / 19 | **a Windows layer already exists**, the architecture is cross-platform |
+| native modules | 15 (all Mach-O) | need a Linux equivalent or a stub |
+| audio capture | ScreenCaptureKit + CoreAudio + AVFoundation | the only genuinely hard part |
 
-Ou seja: portar **não** é reescrever o produto, é escrever a terceira
-implementação da camada nativa (macOS → Windows → Linux).
+In other words: porting is **not** rewriting the product, it is writing the
+third implementation of the native layer (macOS → Windows → Linux).
 
-## Plano por fases
+## Status
 
-- **Fase 1, abrir** (horas): Electron Linux + `app.asar` + stubs dos módulos
-  dispensáveis + `better-sqlite3` recompilado. Objetivo: janela abre, login
-  funciona, notas aparecem. **Esta fase responde a pergunta que decide tudo:
-  o backend aceita um cliente não-oficial?**
-- **Fase 2, gravar** (semanas): implementar `granola.node` para Linux
-  (captura de áudio via PipeWire) respeitando o contrato que o JS espera, 
-  descoberto por engenharia reversa do bundle minificado.
-- **Fase 3, diarização e extras**: `native/diarizer` e o que sobrar.
+**Phase 1 (app boots), largely working.** The window opens, the UI renders,
+SQLite initialises and migrates, and the websocket connects. The app currently
+stops at its own error screen, triggered by a `sqlite-exec-error`; see
+`docs/findings.md` for the full chain and the next thread to pull.
 
-Riscos que podem invalidar o esforço mesmo com tudo funcionando: attestation
-do cliente no backend, auto-update (Squirrel) sobrescrevendo os patches,
-mudança de contrato a cada release, e os termos de uso do serviço.
+**Phase 2 (recording), not started.** Requires implementing `granola.node`
+for Linux (PipeWire capture) against the contract the JS expects.
 
-## Requisitos
+## Requirements
 
-- Docker (todo o ambiente roda em container, **nada é instalado no host**)
-- `p7zip` no host (para ler o `.dmg`)
-- Uma cópia sua do `Granola - AI Notepad.dmg`
+- Docker (the whole toolchain runs in a container, **nothing is installed on the host**)
+- `p7zip` on the host (to read the `.dmg`)
+- Your own copy of `Granola - AI Notepad.dmg`
 
-## Uso, modo desenvolvimento (container)
-
-Nada é instalado no host: Electron e Node vivem na imagem.
+## Usage, development (container)
 
 ```bash
-# 1. extrai o .dmg para work/ (nada disso é versionado)
+# 1. extract the .dmg into work/ (never versioned)
 ./scripts/extract.sh ~/Downloads/"Granola - AI Notepad.dmg"
 
-# 2. mapeia os módulos nativos e o que cada um exige
+# 2. map native modules and platform-specific logic
 ./scripts/analyze.sh
 
-# 3. constrói o ambiente Electron
+# 3. build the Electron environment
 ./scripts/build-env.sh
 
-# 4. sobe a UI com os stubs (janela via X11 do host)
+# 4. launch with stubs applied (window via the host X11)
 ./scripts/run.sh
 ```
 
-## Uso, pacote .deb
-
-Para instalar como aplicativo normal, com ícone no menu:
+## Usage, .deb package
 
 ```bash
-./packaging/build-deb.sh          # constrói dentro de container
-sudo apt install ./dist/granola-linux_0.1.0_amd64.deb
-granola-linux ~/Downloads/"Granola - AI Notepad.dmg"   # só na 1ª vez
+./packaging/build-deb.sh          # built inside a container
+sudo apt install ./dist/granola-for-linux_0.1.0_amd64.deb
+granola-for-linux ~/Downloads/"Granola - AI Notepad.dmg"   # first run only
 ```
 
-Depois da primeira execução, basta `granola-linux` ou o ícone **Granola (Linux)**.
-O `.deb` embute o runtime Electron e os stubs; o app do Granola é extraído do
-seu `.dmg` para `~/.local/share/granola-linux/`, nunca vai dentro do pacote.
+After the first run, `granola-for-linux` or the **Granola (Linux)** menu entry is
+enough. The `.deb` ships the Electron runtime and our stubs; the Granola app is
+extracted from your `.dmg` into `~/.local/share/granola-for-linux/` and never goes
+into the package.
 
-## Estrutura
+## Layout
 
 ```
-scripts/    extração, análise, build do container e execução (dev)
-packaging/  .deb: launcher, desktop entry, control e build em container
-stubs/      loader + substitutos JS dos módulos nativos macOS
-docs/       achados da engenharia reversa
-work/       (ignorado) app extraído, sua cópia, não versionada
-dist/       (ignorado) .deb gerado
+scripts/    extraction, analysis, container build and run (development)
+packaging/  .deb: launcher, desktop entry, control file, containerised build
+stubs/      loader plus JS replacements for the macOS native modules
+docs/       reverse-engineering findings
+work/       (ignored) extracted app, your copy, never versioned
+dist/       (ignored) generated .deb
 ```
 
-## Licença
+## Design notes
 
-Código deste repositório: MIT. Não se aplica ao Granola, que permanece
-propriedade da Granola Labs, Inc.
+- **The bundle is never patched.** `stubs/loader.js` hooks
+  `Module._extensions['.node']` and injects replacements at runtime, so a
+  Granola update does not undo our work, and any integrity check the app runs
+  still sees an untouched bundle.
+- **`granola.js` is instrumented rather than faked.** It logs every call
+  (method name, argument types) and answers callbacks with silence, so running
+  the app reveals the audio-capture contract needed for Phase 2.
+- **Third-party natives are overridden by bind-mount**, not by copying over the
+  app: the loader's require hook does not reach the renderer process, which
+  loads `.node` files on its own.
+
+## Licence
+
+Code in this repository: MIT. This does not extend to Granola itself, which
+remains the property of Granola Labs, Inc.

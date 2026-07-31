@@ -1,16 +1,16 @@
 /**
- * Stub de keychain.node (Keychain do macOS), guarda credenciais.
+ * Stub for keychain.node (macOS Keychain) - credential storage.
  *
- * Sem isto o login não persiste entre execuções. Implementação: arquivo local
- * com permissão 600 em ~/.config/granola-linux. NÃO é equivalente ao Keychain
- * (que é cifrado pelo SO); trocar por libsecret/gnome-keyring quando a Fase 1
- * provar que vale a pena.
+ * Without it the login does not survive a restart. Implementation: a local
+ * 600-mode file under ~/.config/granola-for-linux. This is NOT equivalent to the
+ * Keychain (OS-encrypted); swap for libsecret/gnome-keyring once Phase 1
+ * proves it is worth it.
  */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DIR = path.join(os.homedir(), ".config", "granola-linux");
+const DIR = path.join(os.homedir(), ".config", "granola-for-linux");
 const FILE = path.join(DIR, "credentials.json");
 
 function load() {
@@ -44,7 +44,7 @@ module.exports = {
     save(db);
     return true;
   },
-  // aliases comuns em bindings de keychain
+  // aliases commonly found in keychain bindings
   findPassword(service) {
     const db = load();
     const hit = Object.keys(db).find((k) => k.startsWith(`${service}:`));

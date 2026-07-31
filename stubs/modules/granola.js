@@ -1,14 +1,14 @@
 /**
- * Stub de granola.node, o módulo CENTRAL: captura de áudio do sistema.
+ * Stub for granola.node - the CORE module: system audio capture.
  *
- * No macOS ele usa ScreenCaptureKit + CoreAudio + AVFoundation. É o único
- * módulo cuja substituição exige trabalho real (Fase 2 do projeto): implementar
- * captura via PipeWire/PulseAudio devolvendo o mesmo formato que o JS espera.
+ * On macOS it uses ScreenCaptureKit + CoreAudio + AVFoundation. It is the only
+ * module whose replacement takes real work (project Phase 2): implementing
+ * capture over PipeWire/PulseAudio returning the format the JS expects.
  *
- * Por enquanto ele apenas REGISTRA cada chamada. Isso é proposital e é a nossa
- * ferramenta de engenharia reversa: rodando o app com este stub, o log revela o
- * contrato real (nomes de métodos, ordem, argumentos, callbacks esperados) sem
- * precisar ler o bundle minificado. O resultado alimenta docs/findings.md.
+ * For now it only RECORDS every call. That is deliberate: it is our
+ * reverse-engineering tool - running the app with this stub makes the log reveal
+ * the real contract (method names, order, arguments, expected callbacks)
+ * without reading the minified bundle. The result feeds docs/findings.md.
  */
 const calls = [];
 
@@ -27,11 +27,11 @@ function record(prop, args) {
 const handler = {
   get(_target, prop) {
     if (prop === "then" || typeof prop === "symbol") return undefined;
-    if (prop === "__calls") return calls; // introspecção para os scripts
+    if (prop === "__calls") return calls; // introspection for the scripts
     return (...args) => {
       record(prop, args);
-      // Se o app passar callback, chamamos com "silêncio" para ele seguir o
-      // fluxo e revelar as próximas etapas em vez de travar no primeiro erro.
+      // If the app passes a callback we answer with silence so it keeps going
+      // and reveals later stages instead of stalling on the first error.
       const cb = args.find((a) => typeof a === "function");
       if (cb) setImmediate(() => cb(null, null));
       return undefined;

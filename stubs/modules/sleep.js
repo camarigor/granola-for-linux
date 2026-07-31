@@ -1,4 +1,4 @@
-/** Stub no-op de sleep.node (macOS). Recurso não essencial para gravar/resumir. */
+/** No-op stub for sleep.node (macOS). Not required for recording or summarising. */
 module.exports = new Proxy({}, {
   get(_t, prop) {
     if (prop === "then" || typeof prop === "symbol") return undefined;

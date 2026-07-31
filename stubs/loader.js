@@ -1,14 +1,17 @@
 /**
- * Interceptador de módulos nativos.
+ * Runtime shim loader for running the Granola macOS build on Linux.
  *
- * O bundle chama require('.../native/<nome>.node'), que no Linux não existe
- * (os .node do app são Mach-O). Em vez de editar o bundle minificado, que
- * muda a cada release, nós substituímos o carregador de '.node' do Node:
- * qualquer require de um nativo do Granola devolve o stub JS correspondente
- * de stubs/modules/, e os demais .node (ex.: better-sqlite3 recompilado para
- * Linux) seguem o caminho normal.
+ * The bundle requires `.../native/<name>.node` files that are Mach-O binaries
+ * and cannot load here. Instead of patching the minified bundle, which would
+ * break on every Granola release, we replace Node's `.node` loader: requires
+ * for Granola's native modules resolve to the JS stubs in stubs/modules/, while
+ * genuine third-party natives keep their normal path (or a Linux rebuild).
  *
- * Uso: electron stubs/loader.js  (ele carrega o main real no fim)
+ * It also fixes up runtime state the app assumes about a macOS .app bundle
+ * (resourcesPath, getAppPath, the app:// protocol handler) and installs tracing
+ * that surfaces errors the app would otherwise swallow.
+ *
+ * Usage: electron stubs/loader.js   (it requires the real main at the end)
  */
 const path = require("path");
 const fs = require("fs");
@@ -21,49 +24,49 @@ const VERBOSE = process.env.GRANOLA_STUB_VERBOSE !== "0";
 
 const log = (...a) => VERBOSE && console.log("[stub]", ...a);
 
-// Stubs disponíveis: nome do .node -> caminho do nosso JS
+// Available stubs: .node basename -> path of our JS replacement
 const stubs = new Map();
 for (const f of fs.existsSync(STUB_DIR) ? fs.readdirSync(STUB_DIR) : []) {
   if (f.endsWith(".js")) stubs.set(path.basename(f, ".js"), path.join(STUB_DIR, f));
 }
-log(`${stubs.size} stubs carregados de ${STUB_DIR}`);
+log(`${stubs.size} stubs loaded from ${STUB_DIR}`);
 
 const originalNodeLoader = Module._extensions[".node"];
 
 Module._extensions[".node"] = function (module, filename) {
   const name = path.basename(filename, ".node");
   if (stubs.has(name)) {
-    log(`interceptado: ${name}`);
+    log(`intercepted: ${name}`);
     module.exports = require(stubs.get(name));
     return;
   }
-  // Nativos de terceiros recompilados para Linux (o bundle traz os de macOS).
-  // Ex.: better_sqlite3, sem isto o require falha com "invalid ELF header"
-  // e a UI não monta.
+  // Third-party natives rebuilt for Linux (the bundle ships macOS builds).
+  // e.g. better_sqlite3, without this the require fails with
+  // "invalid ELF header" and the UI never mounts.
   const linuxBuild = path.join(LINUX_NATIVE_DIR, `${name}.node`);
   if (fs.existsSync(linuxBuild)) {
-    log(`usando build Linux: ${name}`);
+    log(`using Linux build: ${name}`);
     return originalNodeLoader(module, linuxBuild);
   }
   try {
     return originalNodeLoader(module, filename);
   } catch (err) {
-    // Nativo desconhecido e incompatível: não derruba o app, devolve objeto
-    // vazio e registra, assim descobrimos o que ainda falta stubar.
-    console.warn(`[stub] FALTA STUB: ${name} (${err.code || err.message})`);
+    // Unknown incompatible native: don't kill the app, return a proxy that
+    // throws a descriptive error on use, so one run reveals everything missing.
+    console.warn(`[stub] MISSING STUB: ${name} (${err.code || err.message})`);
     module.exports = new Proxy({}, {
       get: (_t, prop) => (typeof prop === "string" && prop !== "then"
-        ? () => { throw new Error(`granola-linux: ${name}.${String(prop)}() não implementado`); }
+        ? () => { throw new Error(`granola-for-linux: ${name}.${String(prop)}() not implemented`); }
         : undefined),
     });
   }
 };
 
-// O app resolve seus recursos (dist-app/index.html, assets do protocolo app://)
-// a partir de process.resourcesPath, que no macOS é Granola.app/Contents/Resources.
-// Rodando via `electron loader.js`, o Electron aponta isso para o diretório dele
-// (/opt/electron/resources), onde não há nada: o renderer então falha com
-// net::ERR_FAILED e a janela fica preta. Redirecionamos para o app extraído.
+// The app resolves its assets (dist-app/index.html, app:// protocol) from
+// process.resourcesPath, which on macOS is Granola.app/Contents/Resources.
+// Launched as `electron loader.js`, Electron points it at its own directory
+// (/opt/electron/resources), which is empty: the renderer then fails with
+// net::ERR_FAILED and the window stays blank. Redirect it to the extracted app.
 try {
   Object.defineProperty(process, "resourcesPath", {
     value: APP_DIR,
@@ -72,13 +75,11 @@ try {
   });
   log(`resourcesPath -> ${process.resourcesPath}`);
 } catch (err) {
-  console.warn("[stub] não foi possível ajustar resourcesPath:", err.message);
+  console.warn("[stub] could not set resourcesPath:", err.message);
 }
 
-// app.getAppPath() devolve o diretório do "app" do Electron, que aqui é o do
-// loader (/app/stubs), não o do Granola. O handler do protocolo app:// resolve
-// os assets a partir dele, então todo request cai em caminho inexistente e
-// volta net::ERR_FAILED. Apontamos para o app extraído.
+// Same story for app.getAppPath(): it returns the loader's directory, and the
+// app:// handler resolves assets relative to it.
 try {
   const { app: electronApp } = require("electron");
   if (electronApp && typeof electronApp.getAppPath === "function") {
@@ -86,33 +87,10 @@ try {
     log(`getAppPath -> ${APP_DIR}`);
   }
 } catch (err) {
-  log("não foi possível ajustar getAppPath:", err.message);
+  log("could not set getAppPath:", err.message);
 }
 
-// Loga o caminho real que o handler tenta abrir (ele costuma usar net.fetch
-// com file://). É o que revela se o problema é caminho errado ou permissão.
-if (process.env.GRANOLA_TRACE_PROTOCOL !== "0") {
-  try {
-    const electron = require("electron");
-    if (electron.net && typeof electron.net.fetch === "function") {
-      const originalFetch = electron.net.fetch.bind(electron.net);
-      let logged = 0;
-      electron.net.fetch = async (input, init) => {
-        const url = typeof input === "string" ? input : input && input.url;
-        try {
-          return await originalFetch(input, init);
-        } catch (err) {
-          if (logged++ < 5) console.warn(`[stub:fetch] ${url} -> ${err.message}`);
-          throw err;
-        }
-      };
-    }
-  } catch (err) {
-    log("não foi possível instrumentar net.fetch:", err.message);
-  }
-}
-
-// Fallback do protocolo app://: lê o arquivo do disco e devolve um Response.
+// app:// resolution straight from disk.
 // app://ui/assets/x.js  ->  <APP_DIR>/dist-app/assets/x.js
 const MIME = {
   ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
@@ -127,7 +105,7 @@ let servedCount = 0;
 
 function serveFromDisk(request, why) {
   const url = new URL(request.url);
-  // o host ('ui') é o subdiretório lógico; os arquivos vivem em dist-app/
+  // the host ('ui') is a logical namespace; files live under dist-app/
   const rel = decodeURIComponent(url.pathname).replace(/^\/+/, "");
   const candidates = [
     path.join(APP_DIR, "dist-app", rel),
@@ -135,60 +113,109 @@ function serveFromDisk(request, why) {
     path.join(APP_DIR, rel),
   ];
   for (const file of candidates) {
-    // impede escapar do diretório do app
-    if (!file.startsWith(APP_DIR)) continue;
+    if (!file.startsWith(APP_DIR)) continue; // guard against path traversal
     try {
       const body = fs.readFileSync(file);
-      if (servedCount++ === 0) log(`servindo do disco (handler falhou: ${why})`);
+      if (servedCount++ === 0) log(`serving assets from disk (${why})`);
       return new Response(body, {
         status: 200,
         headers: { "content-type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream" },
       });
     } catch {
-      /* tenta o próximo candidato */
+      /* try next candidate */
     }
   }
-  console.warn(`[stub:proto] não encontrado: ${request.url}`);
+  if (why !== "local shortcut") console.warn(`[stub:proto] not found: ${request.url}`);
   return new Response("not found", { status: 404 });
 }
 
-// Instrumenta o registro do protocolo customizado (app://). A UI do Granola é
-// servida por ele; se o handler resolver para um caminho inexistente, o
-// renderer falha com net::ERR_FAILED e a janela fica preta, sem dizer qual
-// arquivo faltou. Aqui logamos cada request e o que foi devolvido.
+// Wrap the custom protocol registration. The app's own handler uses
+// net.fetch('file://…'), which Chromium refuses here even though the files are
+// present and readable, and letting it try first produced hundreds of failed
+// requests until loading died with net::ERR_INSUFFICIENT_RESOURCES.
 if (process.env.GRANOLA_TRACE_PROTOCOL !== "0") {
   try {
-    const electron = require("electron");
-    const { protocol } = electron;
+    const { protocol } = require("electron");
     if (protocol && typeof protocol.handle === "function") {
       const originalHandle = protocol.handle.bind(protocol);
       protocol.handle = (scheme, handler) => {
-        log(`protocol.handle registrado: ${scheme}://`);
+        log(`protocol.handle registered: ${scheme}://`);
         return originalHandle(scheme, async (request) => {
+          const local = serveFromDisk(request, "local shortcut");
+          if (local.status === 200) return local;
           try {
-            const res = await handler(request);
-            if (res && (!res.status || res.status < 400)) return res;
-            return serveFromDisk(request, res && res.status);
+            return await handler(request);
           } catch (err) {
-            // O handler do app usa net.fetch('file://…'), que o Chromium recusa
-            // neste ambiente mesmo com o arquivo presente e legível. Servimos o
-            // arquivo direto do disco, preservando o app intacto.
-            return serveFromDisk(request, err.message);
+            console.warn(`[stub:proto] ${request.url} -> ${err.message}`);
+            return new Response("not found", { status: 404 });
           }
         });
       };
     }
   } catch (err) {
-    log("não foi possível instrumentar protocol:", err.message);
+    log("could not instrument protocol:", err.message);
   }
 }
 
-// Sobe o app real
+// Log network failures with URL and reason. The app only reports
+// "network-error [object Object]" to its console, which says nothing.
+if (process.env.GRANOLA_TRACE_NET !== "0") {
+  try {
+    const { app: electronApp, session } = require("electron");
+    electronApp.whenReady().then(() => {
+      const seen = new Set();
+      session.defaultSession.webRequest.onErrorOccurred((details) => {
+        const key = `${details.error}:${(details.url || "").split("?")[0]}`;
+        if (seen.has(key) || seen.size > 40) return;
+        seen.add(key);
+        console.warn(`[stub:net] ${details.error} <- ${details.url}`);
+      });
+    });
+  } catch (err) {
+    log("could not instrument webRequest:", err.message);
+  }
+}
+
+// The app catches renderer exceptions in a React error boundary and ships them
+// to Sentry, showing only "Something went wrong", the real error never reaches
+// the log. Inject listeners per window to surface message, file and stack.
+if (process.env.GRANOLA_TRACE_ERRORS !== "0") {
+  try {
+    const { app: electronApp, BrowserWindow } = require("electron");
+    electronApp.whenReady().then(() => {
+      const attach = (win) => {
+        const wc = win.webContents;
+        wc.on("did-finish-load", () => {
+          wc.executeJavaScript(`
+            (() => {
+              if (window.__granolaLinuxTrace) return;
+              window.__granolaLinuxTrace = true;
+              window.addEventListener('error', (e) => {
+                console.log('[APP-ERROR]', e.message, '@', e.filename + ':' + e.lineno,
+                            (e.error && e.error.stack || '').split('\\n').slice(0,3).join(' | '));
+              });
+              window.addEventListener('unhandledrejection', (e) => {
+                const r = e.reason;
+                console.log('[APP-REJECT]', (r && (r.stack || r.message)) || String(r));
+              });
+            })();
+          `).catch(() => {});
+        });
+      };
+      BrowserWindow.getAllWindows().forEach(attach);
+      electronApp.on("browser-window-created", (_e, win) => attach(win));
+    });
+  } catch (err) {
+    log("could not instrument renderer errors:", err.message);
+  }
+}
+
+// Hand over to the real app
 const mainPath = path.join(APP_DIR, "dist-electron", "main", "index.js");
 if (!fs.existsSync(mainPath)) {
-  console.error(`[stub] ERRO: main não encontrado em ${mainPath}`);
-  console.error("[stub] rode ./scripts/extract.sh antes");
+  console.error(`[stub] ERROR: main not found at ${mainPath}`);
+  console.error("[stub] run ./scripts/extract.sh first");
   process.exit(1);
 }
-log(`carregando main: ${mainPath}`);
+log(`loading main: ${mainPath}`);
 require(mainPath);

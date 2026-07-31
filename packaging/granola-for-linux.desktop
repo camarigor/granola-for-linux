@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Granola (Linux)
+GenericName=AI Notepad
+Comment=Granola client running on Linux via Electron
+Exec=granola-for-linux %f
+Icon=granola-for-linux
+Terminal=false
+Categories=Office;AudioVideo;
+Keywords=meeting;notes;transcription;ai;
+StartupWMClass=Granola
