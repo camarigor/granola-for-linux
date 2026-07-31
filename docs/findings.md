@@ -371,19 +371,32 @@ of applications changes.
 
 ## Open questions
 
-1. **`granola.node` contract**, method names, arguments, audio buffer layout.
-   `stubs/modules/granola.js` logs every call to reveal it at runtime. This is
-   the whole of Phase 2: audio capture via PipeWire.
-2. **Where diarisation runs**, locally (`speaker_embedding_process`) or server-side.
-3. **`meet-consent-host`**, a native messaging host the app installs for its
-   Chrome extensions. Needs a Linux replacement (or a clean disable) in Phase 2.
-4. **Registering `granola://` on the host**, a `.desktop` entry with
-   `MimeType=x-scheme-handler/granola` would let the browser hand the callback
-   back automatically, removing the copy-paste step. Belongs in the `.deb`
-   (which owns host integration); the container flow keeps using
-   `scripts/deliver-callback.sh`.
+1. **`meet-consent-host`**, a native messaging host the app installs for its
+   Chrome extensions, driving the Google Meet consent overlay. It logs
+   `meet-consent-enable-failed` on every start and blocks nothing else. Needs a
+   Linux replacement or a clean disable.
+2. **Where diarisation runs**, locally (`speaker_embedding_process`) or server
+   side. Never established, because transcription works without settling it.
+3. **What the browser capture path gives up.** Recording goes through
+   `capture_method: browser` rather than the native module, so input device
+   enumeration and the echo cancellation controls
+   (`disableEchoCancellationOnHeadphones`, `enableAutomaticGainCompensation`)
+   are untested. If either turns out to matter, `granola.node` becomes worth
+   implementing after all, and its contract is recorded above.
 
 ### Answered
 
-- **Backend attestation**, *yes, the server accepts a non-official client.*
-  Full login and sync completed from the container on 2026-07-31.
+- **Backend attestation.** *Yes, the server accepts a non-official client.*
+  Full login and sync completed from the container on 2026-07-31, later
+  repeated from the installed package with both Google and Microsoft.
+- **Does recording need `granola.node`?** *No.* The assumption that it was "the
+  whole of Phase 2" was wrong. The app has a browser capture path covering the
+  microphone and system audio both, and that is what runs on Linux today.
+- **Does meeting auto-detection need `granola.node`?** *No*, though it looked
+  like the one feature that genuinely did. The macOS helper's entire job is to
+  answer `getActiveInputProcesses()`, and `pw-dump` answers the same question,
+  so `stubs/mic-monitor-linux.js` is plain JavaScript with nothing compiled.
+- **Registering `granola://` on the host.** Done: the `.deb` ships
+  `MimeType=x-scheme-handler/granola` in its desktop entry, so the browser
+  returns the OAuth callback by itself and signing in takes no manual step. The
+  container has no such route and keeps using `scripts/deliver-callback.sh`.
