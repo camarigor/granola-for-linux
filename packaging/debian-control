@@ -24,7 +24,7 @@ Depends: 7zip | p7zip-full,
  libxkbcommon0,
  libxrandr2
 Recommends: desktop-file-utils, pipewire-bin
-Homepage: https://forgejo.tinfoilhat.work/camarigor/granola-for-linux
+Homepage: https://github.com/camarigor/granola-for-linux
 Description: runtime and shims to run Granola on Linux
  Granola is a meeting notepad: it records a call, transcribes it and drafts the
  notes. Its makers publish builds for macOS and Windows only. This package
