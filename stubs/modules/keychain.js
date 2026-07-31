@@ -1,24 +1,48 @@
 /**
  * Stub for keychain.node (macOS Keychain) - credential storage.
  *
- * Without it the login does not survive a restart. Implementation: a local
- * 600-mode file under ~/.config/granola-for-linux. This is NOT equivalent to the
- * Keychain (OS-encrypted); swap for libsecret/gnome-keyring once Phase 1
- * proves it is worth it.
+ * Observed on Linux: the app never loads this module. It keeps its own tokens
+ * in userData (stored-accounts.json.enc and supabase.json.enc, encrypted with
+ * storage.dek), which is why signing in survives a restart without the
+ * keychain being involved at all. The stub stays because the module is present
+ * in the macOS bundle and some code path may still reach for it.
+ *
+ * If it is ever called, the file belongs in userData: that is the directory
+ * both delivery paths persist, whereas a directory of its own would be
+ * container-ephemeral. A 600-mode JSON file is NOT equivalent to the Keychain
+ * (OS-encrypted); swap for libsecret/gnome-keyring if this ever carries real
+ * secrets.
  */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DIR = path.join(os.homedir(), ".config", "granola-for-linux");
+function credentialsDir() {
+  try {
+    const { app } = require("electron");
+    if (app && typeof app.getPath === "function") return app.getPath("userData");
+  } catch {
+    // not the main process (or Electron unavailable), fall through
+  }
+  return process.env.GRANOLA_CREDENTIALS_DIR
+    || path.join(os.homedir(), ".config", "granola-for-linux");
+}
+
+const DIR = credentialsDir();
 const FILE = path.join(DIR, "credentials.json");
+// Where earlier builds wrote; read it if the current location has nothing, so
+// changing the path never silently drops a stored credential.
+const LEGACY_FILE = path.join(os.homedir(), ".config", "granola-for-linux", "credentials.json");
 
 function load() {
-  try {
-    return JSON.parse(fs.readFileSync(FILE, "utf8"));
-  } catch {
-    return {};
+  for (const file of [FILE, LEGACY_FILE]) {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      /* try the legacy path */
+    }
   }
+  return {};
 }
 
 function save(data) {
