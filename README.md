@@ -41,9 +41,14 @@ capture path (`capture_method: browser`) covering both the microphone and
 system audio, so porting `granola.node` was not required. Because capture
 happens at the OS audio layer, Teams, Zoom and Meet are all equivalent.
 
-**Phase 3 (packaging), next.** Ship the `.deb`, register the `granola://`
-scheme so login needs no manual step, and add meeting auto-detection
-(a PipeWire equivalent of the macOS "which apps hold the microphone" monitor).
+**Phase 3 (packaging), done.** The `.deb` installs on Ubuntu 24.04, extracts
+the app from your own `.dmg`, and **signs in with no manual step**: the browser
+hands the `granola://` callback straight back through the registered scheme
+handler.
+
+**Phase 4 (meeting auto-detection), next.** A PipeWire equivalent of the macOS
+monitor that reports which applications currently hold the microphone. It is
+the one remaining feature that genuinely needs a `granola.node`.
 
 See `docs/findings.md` for every obstacle, its cause and its fix.
 

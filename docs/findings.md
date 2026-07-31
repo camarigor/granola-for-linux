@@ -279,6 +279,36 @@ names one the package has no right to distribute, so the launcher lifts
 `granola_app_icon-*.png` out of the extracted app on first run (the asset name
 carries a content hash, hence the glob).
 
+**Two more failures surfaced by the first real install:**
+
+| # | Symptom | Cause | Fix |
+|---|---|---|---|
+| 13 | `exec: /tmp/pkg/opt/.../asar: not found` | the heredoc generating `asar-extract` was unquoted, so `$PREFIX` expanded at build time and the staging path was written into the shipped script | quoted heredoc holding the installed prefix |
+| 14 | (would have followed) asar needs `node` on `$PATH` | it ships a `#!/usr/bin/env node` script; on this machine Node comes from mise and is absent from a plain shell, a `.deb` must not require it | run it through the bundled Electron with `ELECTRON_RUN_AS_NODE=1` |
+
+The launcher also stopped trying an asar inside Electron that never existed,
+whose failure was swallowed by `2>/dev/null`, the redirect that would have
+hidden #14 had it appeared alone.
+
+### Validated end to end (2026-07-31)
+
+```
+app extracted -> installing the Linux sqlite module
+single-instance-lock-acquired
+google_login_clicked -> rewrote platform=linux -> macos -> browser
+second-instance argv: [... "granola://login-complete?code=..."]
+granola-url-handled {"type":"login-complete"} -> login_completed
+auth-electron-set-tokens -> auth-electron-set-user-info -> homescreen_viewed
+```
+
+Signing in needs **no manual step** from the package: the browser returns the
+callback through the registered scheme handler, and the app takes it off argv
+via its single-instance handler.
+
+**Do not test deep links against a live session.** Delivering a made-up
+`granola://login-complete?code=test123` to a signed-in app makes the backend
+answer `400 Invalid authorization grant`, and the app signs the user out.
+
 ## Open questions
 
 1. **`granola.node` contract**, method names, arguments, audio buffer layout.
