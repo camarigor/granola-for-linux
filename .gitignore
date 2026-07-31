@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NADA de código/binário do Granola entra neste repositório.
+# O app é proprietário: cada usuário extrai a própria cópia com scripts/extract.sh.
+# Este repo contém APENAS código nosso (stubs, scripts, documentação).
+# ─────────────────────────────────────────────────────────────────────────────
+*.dmg
+*.asar
+*.node
+work/            # área de trabalho: app extraído, asar desempacotado
+app-src/
+Granola/
+Granola.app/
+
+# Node
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# Runtime
+dist/
+out/
+*.log
+.DS_Store
