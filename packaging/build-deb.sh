@@ -81,8 +81,32 @@ dpkg-deb --info "/out/granola-for-linux_${VERSION}_amd64.deb" | sed -n "1,40p"
 chown "${UID}:${UID}" "/out/granola-for-linux_${VERSION}_amd64.deb"
 '
 
+DEB="$OUT/granola-for-linux_${VERSION}_amd64.deb"
+
+# apt fetches as the unprivileged '_apt' user. If any directory on the way to
+# the package is not world-traversable, a home directory is usually 750, apt
+# cannot read it, prints "Download is performed unsandboxed as root" and falls
+# back to root. It installs correctly either way, but suggesting a path apt can
+# actually reach keeps the output clean.
+apt_can_read() {
+    local dir="$1"
+    while [[ "$dir" != "/" ]]; do
+        # Last character of the mode string is other-execute: 'x', or 't' when
+        # the sticky bit is set (as on /tmp). Both mean traversable.
+        [[ "$(stat -c '%A' "$dir" 2>/dev/null)" == *[xt] ]] || return 1
+        dir="$(dirname "$dir")"
+    done
+    return 0
+}
+
 echo
-ls -lh "$OUT"/*.deb
+ls -lh "$DEB"
 echo
-echo "install:  sudo apt install $OUT/granola-for-linux_${VERSION}_amd64.deb"
+if apt_can_read "$OUT"; then
+    echo "install:  sudo apt install $DEB"
+else
+    echo "install:  cp $DEB /tmp/ && sudo apt install /tmp/$(basename "$DEB")"
+    echo "          (installing straight from \$HOME works too, but apt warns that"
+    echo "           its '_apt' user cannot read through a 750 home directory)"
+fi
 echo "use:      granola-for-linux ~/Downloads/'Granola - AI Notepad.dmg'   (first run only)"
