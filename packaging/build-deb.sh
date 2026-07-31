@@ -44,9 +44,18 @@ ELECTRON_VERSION_FOR_ABI="${ELECTRON_VERSION}" bash /src/scripts/build-sqlite.sh
 
 echo "[deb] installing asar (to unpack the user app.asar) ..."
 npm install --no-save --silent --prefix "$PREFIX/bin" @electron/asar >/dev/null
-cat > "$PREFIX/bin/asar-extract" <<EOS
+# Quoted heredoc: the paths below must resolve where the package is INSTALLED,
+# not where it is being staged. An unquoted one bakes in /tmp/pkg/... and the
+# script dies with "not found" on the user machine.
+# asar ships a #!/usr/bin/env node script, and a .deb has no business requiring
+# Node on the host, so it runs through the Electron we already ship.
+cat > "$PREFIX/bin/asar-extract" <<"EOS"
 #!/bin/sh
-exec "$PREFIX/bin/node_modules/.bin/asar" extract "\$1" "\$2"
+INSTALL_PREFIX=/opt/granola-for-linux
+export ELECTRON_RUN_AS_NODE=1
+exec "$INSTALL_PREFIX/electron/electron" \
+    "$INSTALL_PREFIX/bin/node_modules/@electron/asar/bin/asar.mjs" \
+    extract "$1" "$2"
 EOS
 chmod +x "$PREFIX/bin/asar-extract"
 

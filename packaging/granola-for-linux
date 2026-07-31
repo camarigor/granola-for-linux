@@ -36,9 +36,7 @@ if [[ ! -d "$APP" ]]; then
     [[ -f "$asar" ]] || die "app.asar not found - is this really the Granola .dmg?"
 
     mkdir -p "$DATA"
-    "$PREFIX/electron/resources/app/node_modules/.bin/asar" extract "$asar" "$APP" 2>/dev/null \
-        || "$PREFIX/bin/asar-extract" "$asar" "$APP" \
-        || die "failed to unpack app.asar"
+    "$PREFIX/bin/asar-extract" "$asar" "$APP" || die "failed to unpack app.asar"
     echo "granola-for-linux: app extracted to $APP"
 fi
 
