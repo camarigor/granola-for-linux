@@ -62,6 +62,39 @@ Module._extensions[".node"] = function (module, filename) {
   }
 };
 
+// Unpackaged, Electron calls itself "Electron", so userData lands in
+// ~/.config/Electron, a directory every other unpackaged Electron app on the
+// machine also claims. The bundle's own package.json says
+// productName: "Granola"; adopt it, and pin the paths derived from it before
+// anything reads them (the app calls getPath('userData') 25 times).
+const APP_NAME = process.env.GRANOLA_APP_NAME || "Granola";
+try {
+  const { app: electronApp } = require("electron");
+  electronApp.setName(APP_NAME);
+  // setName() resets Linux's cached application info, and the version goes
+  // with it: app.getVersion() then returns empty, electron-updater reads it as
+  // "0.0" and throws "App version is not a valid semver version" before the
+  // window ever opens. Restore it from the bundle's own package.json.
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(APP_DIR, "package.json"), "utf8"));
+    if (pkg.version) {
+      electronApp.setVersion(pkg.version);
+      log(`version -> ${pkg.version}`);
+    }
+  } catch (err) {
+    console.warn("[stub] could not set app version:", err.message);
+  }
+  const userData = path.join(electronApp.getPath("appData"), APP_NAME);
+  electronApp.setPath("userData", userData);
+  // sessionData defaults to userData, but only as resolved at startup.
+  try {
+    electronApp.setPath("sessionData", userData);
+  } catch { /* older Electron has no sessionData */ }
+  log(`userData -> ${userData}`);
+} catch (err) {
+  console.warn("[stub] could not set app name/userData:", err.message);
+}
+
 // The app resolves its assets (dist-app/index.html, app:// protocol) from
 // process.resourcesPath, which on macOS is Granola.app/Contents/Resources.
 // Launched as `electron loader.js`, Electron points it at its own directory

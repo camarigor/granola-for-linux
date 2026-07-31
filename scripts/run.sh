@@ -55,12 +55,13 @@ if [[ -d "$NATIVE_DIR/better-sqlite3-multiple-ciphers" && -d "$APP/$SQLITE_PKG" 
 fi
 
 # ── Persistent app data ──────────────────────────────────────────────────────
-# Electron keeps userData under $XDG_CONFIG_HOME/<appName>; launched as
-# `electron loader.js` the app is unpackaged, so the name is "Electron".
-# Without this volume the SQLite database and the auth tokens live inside the
-# container and every restart forces a fresh login.
+# Electron keeps userData under $XDG_CONFIG_HOME/<appName>; loader.js renames
+# the app to Granola so it does not squat on the generic "Electron" directory.
+# Without this volume the SQLite database and the auth tokens would live inside
+# the container and every restart would force a fresh login.
 DATA_DIR="$WORK/app-data"
 mkdir -p "$DATA_DIR"
+CONTAINER_DATA_DIR="/home/electron-cache/.config/Granola"
 
 # ── URL bridge (container -> host browser) ───────────────────────────────────
 # There is no browser inside the container, so the loader intercepts
@@ -98,7 +99,7 @@ docker run --rm ${DOCKER_TTY:--it} \
     -v "$ROOT/stubs:/app/stubs:ro" \
     -e GRANOLA_BRIDGE_DIR=/app/bridge \
     -v "$BRIDGE_DIR:/app/bridge" \
-    -v "$DATA_DIR:/home/electron-cache/.config/Electron" \
+    -v "$DATA_DIR:$CONTAINER_DATA_DIR" \
     -v "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse:/run/pulse:ro" \
     -e PULSE_SERVER=unix:/run/pulse/native \
     "${SQLITE_MOUNT[@]}" \
