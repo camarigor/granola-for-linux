@@ -210,6 +210,166 @@ if (process.env.GRANOLA_TRACE_ERRORS !== "0") {
   }
 }
 
+// shell.openExternal dies silently in the container: there is no browser and
+// no xdg-open (the log shows a bare "xdg-open" line and the login flow stops
+// at /login-in-progress). Drop the URL into the bridge directory instead, 
+// run.sh watches it on the host and opens the user's real browser, where
+// their Google session lives.
+const BRIDGE_DIR = process.env.GRANOLA_BRIDGE_DIR;
+if (BRIDGE_DIR) {
+  try {
+    const { shell } = require("electron");
+    const originalOpenExternal = shell.openExternal.bind(shell);
+    let openSeq = 0;
+    shell.openExternal = async (url) => {
+      let target = String(url);
+      // api.granola.ai/v1/auth 500s on any platform value other than
+      // macos/windows (bisected 2026-07-31: linux/darwin/mac -> 500). The app
+      // sends process.platform verbatim when its map has no entry. We run the
+      // genuine macOS bundle, so present it as such.
+      try {
+        const u = new URL(target);
+        if (u.hostname.endsWith("granola.ai") && u.searchParams.get("platform") === "linux") {
+          u.searchParams.set("platform", "macos");
+          target = u.toString();
+          console.log("[stub:open-external] rewrote platform=linux -> macos (backend 500s on unknown values)");
+        }
+      } catch { /* not a parseable URL, pass through as-is */ }
+      console.log(`[stub:open-external] ${target}`);
+      try {
+        // two-step write so the host watcher never reads a half-written file
+        const base = path.join(BRIDGE_DIR, `open-${process.pid}-${openSeq++}`);
+        fs.writeFileSync(`${base}.tmp`, target);
+        fs.renameSync(`${base}.tmp`, `${base}.url`);
+      } catch (err) {
+        console.warn("[stub:open-external] bridge write failed:", err.message);
+        return originalOpenExternal(target);
+      }
+    };
+    log(`openExternal -> bridge at ${BRIDGE_DIR}`);
+  } catch (err) {
+    log("could not instrument shell.openExternal:", err.message);
+  }
+}
+
+// Surface how the OAuth callback is expected to arrive. On macOS the deep
+// link comes in via the 'open-url' event; on Linux a second instance gets
+// the granola:// URL in argv. Log both so the callback mechanism is visible.
+try {
+  const { app: electronApp } = require("electron");
+  electronApp.on("open-url", (_e, url) => {
+    console.log(`[stub:deep-link] open-url: ${url}`);
+  });
+  electronApp.on("second-instance", (_e, argv) => {
+    console.log(`[stub:deep-link] second-instance argv: ${JSON.stringify(argv)}`);
+  });
+} catch (err) {
+  log("could not instrument deep links:", err.message);
+}
+
+// Deep-link return path: the host browser has no granola:// handler, so the
+// OAuth callback cannot reach the container on its own. Any callback-*.url
+// file dropped in the bridge (see scripts/deliver-callback.sh) is re-emitted
+// as an 'open-url' event, the channel the app's OpenURLHandler listens on, 
+// with a second-instance argv fallback.
+if (BRIDGE_DIR) {
+  try {
+    const { app: electronApp } = require("electron");
+    const deliver = (url) => {
+      console.log(`[stub:deep-link] delivering from bridge: ${url.slice(0, 120)}`);
+      electronApp.emit("open-url", { preventDefault() {} }, url);
+    };
+    setInterval(() => {
+      let files;
+      try { files = fs.readdirSync(BRIDGE_DIR); } catch { return; }
+      for (const f of files) {
+        if (!f.startsWith("callback-") || !f.endsWith(".url")) continue;
+        const p = path.join(BRIDGE_DIR, f);
+        try {
+          const url = fs.readFileSync(p, "utf8").trim();
+          fs.unlinkSync(p);
+          if (url) deliver(url);
+        } catch (err) {
+          console.warn("[stub:deep-link] bridge read failed:", err.message);
+        }
+      }
+    }, 500).unref();
+    log("deep-link bridge watcher armed");
+  } catch (err) {
+    log("could not arm deep-link watcher:", err.message);
+  }
+}
+
+// The app's structured logger prints "sqlite-exec-error [object Object]" to
+// the terminal, the detail object (the actual SQL error) never survives
+// Chromium's console serialisation, and the window error listeners above never
+// fire because the app catches the exception itself. Attach the DevTools
+// protocol instead: Runtime.consoleAPICalled hands us the real argument
+// objects, which we expand to JSON. Runtime.enable also replays messages
+// logged before we attached, so early boot errors are not lost.
+if (process.env.GRANOLA_TRACE_CONSOLE !== "0") {
+  try {
+    const { app: electronApp, BrowserWindow } = require("electron");
+    const INTERESTING = /error|fail|warn|went wrong/i;
+
+    const shallowPreview = (p) => p && p.properties
+      ? "{" + p.properties.map((x) => `${x.name}: ${x.value}`).join(", ") + "}"
+      : null;
+
+    const expandArg = async (wc, a) => {
+      if (!a.objectId) return String(a.value ?? a.description ?? a.type);
+      try {
+        const r = await wc.debugger.sendCommand("Runtime.callFunctionOn", {
+          objectId: a.objectId,
+          returnByValue: true,
+          functionDeclaration: `function () {
+            const seen = new Set();
+            try {
+              return JSON.stringify(this, (k, v) => {
+                if (v instanceof Error) return { message: v.message, stack: v.stack };
+                if (typeof v === "object" && v !== null) {
+                  if (seen.has(v)) return "[circular]";
+                  seen.add(v);
+                }
+                return v;
+              }).slice(0, 6000);
+            } catch (e) { return "unserializable: " + e.message; }
+          }`,
+        });
+        return (r.result && r.result.value) || shallowPreview(a.preview) || a.description || "?";
+      } catch {
+        // objectId may be gone for replayed pre-attach messages; the shallow
+        // preview (first ~5 properties) is still better than [object Object].
+        return shallowPreview(a.preview) || a.description || "?";
+      }
+    };
+
+    electronApp.whenReady().then(() => {
+      const attach = (win) => {
+        const wc = win.webContents;
+        try {
+          wc.debugger.attach("1.3");
+        } catch {
+          return; // already attached
+        }
+        wc.debugger.on("message", async (_e, method, params) => {
+          if (method !== "Runtime.consoleAPICalled") return;
+          const args = params.args || [];
+          const first = String(args[0] && (args[0].value ?? args[0].description) || "");
+          if (!INTERESTING.test(first) && params.type !== "error") return;
+          const parts = await Promise.all(args.map((a) => expandArg(wc, a)));
+          console.log(`[APP-LOG:${params.type}]`, parts.join(" "));
+        });
+        wc.debugger.sendCommand("Runtime.enable").catch(() => {});
+      };
+      BrowserWindow.getAllWindows().forEach(attach);
+      electronApp.on("browser-window-created", (_e, win) => attach(win));
+    });
+  } catch (err) {
+    log("could not attach console tracer:", err.message);
+  }
+}
+
 // Hand over to the real app
 const mainPath = path.join(APP_DIR, "dist-electron", "main", "index.js");
 if (!fs.existsSync(mainPath)) {
