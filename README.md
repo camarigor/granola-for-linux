@@ -45,7 +45,9 @@ mudança de contrato a cada release, e os termos de uso do serviço.
 - `p7zip` no host (para ler o `.dmg`)
 - Uma cópia sua do `Granola - AI Notepad.dmg`
 
-## Uso
+## Uso, modo desenvolvimento (container)
+
+Nada é instalado no host: Electron e Node vivem na imagem.
 
 ```bash
 # 1. extrai o .dmg para work/ (nada disso é versionado)
@@ -54,20 +56,36 @@ mudança de contrato a cada release, e os termos de uso do serviço.
 # 2. mapeia os módulos nativos e o que cada um exige
 ./scripts/analyze.sh
 
-# 3. constrói o ambiente Electron (container, não toca o host)
+# 3. constrói o ambiente Electron
 ./scripts/build-env.sh
 
-# 4. aplica os stubs e tenta subir a UI
+# 4. sobe a UI com os stubs (janela via X11 do host)
 ./scripts/run.sh
 ```
+
+## Uso, pacote .deb
+
+Para instalar como aplicativo normal, com ícone no menu:
+
+```bash
+./packaging/build-deb.sh          # constrói dentro de container
+sudo apt install ./dist/granola-linux_0.1.0_amd64.deb
+granola-linux ~/Downloads/"Granola - AI Notepad.dmg"   # só na 1ª vez
+```
+
+Depois da primeira execução, basta `granola-linux` ou o ícone **Granola (Linux)**.
+O `.deb` embute o runtime Electron e os stubs; o app do Granola é extraído do
+seu `.dmg` para `~/.local/share/granola-linux/`, nunca vai dentro do pacote.
 
 ## Estrutura
 
 ```
-scripts/   extração, análise, build do container e execução
-stubs/     nossos substitutos JS para os módulos nativos macOS
-docs/      achados da engenharia reversa
-work/      (ignorado) app extraído, sua cópia, não versionada
+scripts/    extração, análise, build do container e execução (dev)
+packaging/  .deb: launcher, desktop entry, control e build em container
+stubs/      loader + substitutos JS dos módulos nativos macOS
+docs/       achados da engenharia reversa
+work/       (ignorado) app extraído, sua cópia, não versionada
+dist/       (ignorado) .deb gerado
 ```
 
 ## Licença

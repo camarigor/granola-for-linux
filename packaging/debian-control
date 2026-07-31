@@ -1,0 +1,17 @@
+Package: granola-linux
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: camarigor <igor@marques-it.tech>
+Depends: p7zip-full, libnss3, libatk1.0-0, libatk-bridge2.0-0, libcups2, libdrm2, libxkbcommon0, libxcomposite1, libxdamage1, libxfixes3, libxrandr2, libgbm1, libasound2, libpango-1.0-0, libcairo2, libgtk-3-0
+Homepage: https://forgejo.tinfoilhat.work/camarigor/granola-linux
+Description: Executa o cliente Granola (macOS/Electron) no Linux
+ Empacota o runtime Electron e os stubs dos módulos nativos macOS necessários
+ para carregar o cliente Granola em Linux.
+ .
+ Este pacote NÃO distribui o Granola. Na primeira execução ele extrai o app da
+ cópia do .dmg oficial que o próprio usuário baixou de granola.ai.
+ .
+ Estado: Fase 1 (a interface carrega). A captura de áudio depende de um módulo
+ nativo ainda não portado, ver docs/findings.md no repositório.
