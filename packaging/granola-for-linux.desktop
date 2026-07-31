@@ -4,7 +4,7 @@ Name=Granola (Linux)
 GenericName=AI Notepad
 Comment=Granola client running on Linux via Electron
 # %u, not %f: the OAuth callback arrives as a granola:// URL. The MimeType line
-# is what makes the browser hand it back, so signing in needs no manual step, 
+# is what makes the browser hand it back, so signing in needs no manual step 
 # the app already listens for it (single-instance lock plus second-instance,
 # whose handler scans argv for a valid deep link).
 Exec=granola-for-linux %u

@@ -345,7 +345,7 @@ try {
 // Deep-link return path: the host browser has no granola:// handler, so the
 // OAuth callback cannot reach the container on its own. Any callback-*.url
 // file dropped in the bridge (see scripts/deliver-callback.sh) is re-emitted
-// as an 'open-url' event, the channel the app's OpenURLHandler listens on, 
+// as an 'open-url' event, the channel the app's OpenURLHandler listens on 
 // with a second-instance argv fallback.
 if (BRIDGE_DIR) {
   try {

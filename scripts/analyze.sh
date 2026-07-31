@@ -17,7 +17,7 @@ for n in "$RES"/native/*.node; do
     fw=$(strings "$n" 2>/dev/null \
          | grep -oE 'ScreenCaptureKit|CoreAudio|AVFoundation|AVFAudio|EventKit|CoreMedia|AppKit' \
          | sort -u | paste -sd, -)
-    printf "  %-38s %s\n" "$(basename "$n")" "${fw:-, }"
+    printf "  %-38s %s\n" "$(basename "$n")" "${fw:-}"
 done
 
 echo

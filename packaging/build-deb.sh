@@ -84,7 +84,7 @@ chown "${UID}:${UID}" "/out/granola-for-linux_${VERSION}_amd64.deb"
 DEB="$OUT/granola-for-linux_${VERSION}_amd64.deb"
 
 # apt fetches as the unprivileged '_apt' user. If any directory on the way to
-# the package is not world-traversable, a home directory is usually 750, apt
+# the package is not world-traversable: a home directory is usually 750, apt
 # cannot read it, prints "Download is performed unsandboxed as root" and falls
 # back to root. It installs correctly either way, but suggesting a path apt can
 # actually reach keeps the output clean.

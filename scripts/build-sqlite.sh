@@ -47,7 +47,7 @@ echo "[sqlite] compiling against Electron ${ABI} headers ..."
 test -f "$SRC/build/Release/better_sqlite3.node"
 
 # The other half of the fork: db.updateHook(). It is the app's change
-# notification backbone, so it has to be a real implementation, not a stub, see
+# notification backbone, so it has to be a real implementation, not a stub: see
 # stubs/sqlite-updatehook-shim.js. The require has to live inside the package
 # itself: the sqlite worker runs in its own thread and never passes through the
 # loader's require hook. GRANOLA_STUBS_DIR keeps the one snippet working from

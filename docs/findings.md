@@ -40,8 +40,8 @@ the product. The 19 `linux` hits are likely defensive checks, to be confirmed.
 | Module | Apple frameworks | Needed to record? |
 |---|---|---|
 | **granola** | **ScreenCaptureKit, CoreAudio, AVFoundation** | **YES, this is the capture** |
-| diarizer (`native/diarizer`) |, | likely (speaker separation) |
-| keychain |, | yes (persisting login) |
+| diarizer (`native/diarizer`) | none | likely (speaker separation) |
+| keychain | none | yes (persisting login) |
 | eventkit | EventKit | no (calendar) |
 | screen_capture_ocr | ScreenCaptureKit | no |
 | third_party_meeting_automation | AppKit | no (drives Zoom/Meet) |
@@ -70,7 +70,7 @@ main                       preload
 
 `speaker_embedding_process` suggests part of the diarisation runs locally.
 
-## Phase 1, obstacles hit and solved (2026-07-31)
+## Phase 1: obstacles hit and solved (2026-07-31)
 
 Running `electron loader.js` against the extracted app, in the order they appeared:
 
@@ -130,14 +130,14 @@ integrations correctly report "no access token" for an unauthenticated session.
 Closing the window does **not** exit the process (macOS menu-bar behaviour).
 
 The only remaining startup error is non-blocking: `meet-consent-enable-failed`
-, the app looks for `/app/native/x64/meet-consent-host`, a macOS helper binary
+the app looks for `/app/native/x64/meet-consent-host`, a macOS helper binary
 for the Google Meet consent flow (Phase 2 material).
 
 **No native stub has been called yet**, the UI mounts without touching the
 macOS modules. They should only come into play at login and, above all, when
 recording (Phase 2).
 
-## Phase 1.5, login (OAuth)
+## Phase 1.5: login (OAuth)
 
 The login button calls `shell.openExternal(authUrl)`. In the container there is
 no browser, so the loader writes the URL to a bridge directory and a watcher on
@@ -187,7 +187,7 @@ Read out of `dist-electron/main/index.js`:
 → `full-sync-complete`. **The backend accepts a non-official client**, no
 attestation, no platform check beyond the `/v1/auth` parameter above.
 
-## Phase 2, recording (mostly already working)
+## Phase 2: recording (mostly already working)
 
 The assumption was that recording required porting `granola.node`. It does not.
 The log says:
@@ -196,7 +196,7 @@ The log says:
 received-start-audio-capture {"sampleRate":16000,"capture_method":"browser"}
 ```
 
-**There is a browser capture path**, Chromium's own APIs, no native module, 
+**There is a browser capture path**, Chromium's own APIs, no native module 
 and it serves *both* sources. Two transcription handlers connect
 (`source: microphone`, `source: system`), both reach
 `transcription-first-buffer-sent-timestamp`, and both report latency from the
@@ -238,7 +238,7 @@ permission gate is skipped off-macOS, `qKe()` returns
 `{audioCapture:'authorized', screenCapture:'authorized'}` when
 `process.platform !== 'darwin'`.
 
-## Phase 3, packaging
+## Phase 3: packaging
 
 Everything that works in the dev container has to survive being installed, and
 two defects only existed on that side.
@@ -314,7 +314,7 @@ via its single-instance handler.
 `granola://login-complete?code=test123` to a signed-in app makes the backend
 answer `400 Invalid authorization grant`, and the app signs the user out.
 
-## Phase 4, meeting auto-detection
+## Phase 4: meeting auto-detection
 
 Granola knows a call started by watching **which applications hold the
 microphone**. The pipeline, read out of the bundle:

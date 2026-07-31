@@ -7,7 +7,7 @@
 *.asar
 *.node
 # workspace: extracted app, unpacked asar, local native builds
-# (gitignore has no inline comments, a trailing "# ..." on a pattern line
+# (gitignore has no inline comments: a trailing "# ..." on a pattern line
 # becomes part of the pattern and silently disables it)
 work/
 app-src/

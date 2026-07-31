@@ -16,7 +16,7 @@ die() { echo "granola-for-linux: $*" >&2; exit 1; }
 # -- install or update from a .dmg --------------------------------------------
 # Passing a .dmg always (re)extracts, which is how Granola is updated: download
 # the new .dmg and run it through here again. Only consume the argument when it
-# really is a .dmg, a granola:// callback or an Electron flag has to reach the
+# really is a .dmg: a granola:// callback or an Electron flag has to reach the
 # app untouched.
 DMG=""
 if [[ "${1:-}" == *.dmg ]]; then
