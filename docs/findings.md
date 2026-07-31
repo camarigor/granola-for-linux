@@ -309,6 +309,61 @@ via its single-instance handler.
 `granola://login-complete?code=test123` to a signed-in app makes the backend
 answer `400 Invalid authorization grant`, and the app signs the user out.
 
+## Phase 4, meeting auto-detection
+
+Granola knows a call started by watching **which applications hold the
+microphone**. The pipeline, read out of the bundle:
+
+```
+platform monitor  ->  callback([{bundleId, pid, deviceUID}])  ->  FTt()
+                                                                   |
+                              meeting-apps log, setMicApps dispatch, mute sync
+```
+
+Two facts made this tractable:
+
+- **The contract is one function.** `subscribe(callback) -> unsubscribe`. The
+  macOS helper is just as small: it requires its native module from
+  `process.argv[2]` and calls `getActiveInputProcesses()` on a 1 s timer,
+  posting only when the set changes.
+- **Bundle identifiers are the currency on every platform.** The Windows
+  monitor does not invent its own names, it maps `chrome.exe` to
+  `com.google.Chrome`, `ms-teams.exe` to `com.microsoft.teams2`. So a Linux
+  monitor maps executables onto the same identifiers and everything downstream
+  works unchanged.
+
+**The blocker was the platform switch**, which hands Linux a dead arm:
+
+```js
+process.platform === `darwin` ? … : process.platform === `win32` ? … :
+    e => (e([]), () => {})      // reports "nobody" once, then gives up
+```
+
+Since the callback never fires again, the app cannot learn anything.
+
+**What was rejected.** Spoofing `process.platform = 'darwin'` is a two-line
+change and a bad one: the value is read across dozens of branches, native
+module path resolution, the TCC permission gate, the `platform` value sent to
+`/v1/auth`, so it risks regressing login and audio, which work today.
+Dispatching `setMicApps` into their store directly skips the other things
+`FTt()` does (mute sync among them) and would rot against every release.
+
+**What was done.** `loader.js` rewrites that one arm **in memory** before
+compiling main, pointing it at `stubs/mic-monitor-linux.js`. The file on disk is
+never touched, so a Granola update simply replaces it. The pattern is anchored
+on the `win32` ternary and verified to match exactly once; if a future build
+changes shape it stops matching, the app loads verbatim, and only
+auto-detection disappears. `GRANOLA_MIC_MONITOR=0` skips it.
+
+**The monitor** polls `pw-dump` (from `pipewire-bin`) once a second. Capture
+streams are nodes with `media.class = Stream/Input/Audio`; the node names the
+application but the pid lives on the **client** it belongs to, joined through
+`client.id`, where `application.process.binary` and `application.process.id`
+are. Binaries are mapped onto Apple bundle ids, Granola's own processes are
+excluded by walking `/proc/<pid>/stat` up the parent chain (otherwise its own
+recording would look like a meeting), and the callback fires only when the set
+of applications changes.
+
 ## Open questions
 
 1. **`granola.node` contract**, method names, arguments, audio buffer layout.

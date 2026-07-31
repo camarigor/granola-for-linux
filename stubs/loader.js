@@ -452,5 +452,49 @@ if (!fs.existsSync(mainPath)) {
   console.error("[stub] run ./scripts/extract.sh first");
   process.exit(1);
 }
+
+// Meeting auto-detection. The app chooses its microphone monitor by platform:
+//
+//   process.platform === `darwin` ? … : process.platform === `win32` ? … :
+//       e => (e([]), () => {})
+//
+// The last arm is the one Linux gets: it reports "nobody is holding the
+// microphone" once and gives up, so the app can never notice a call started.
+// Everything downstream is platform-neutral, the callback just wants
+// [{bundleId, …}], so only that arm has to change, and stubs/mic-monitor-linux.js
+// supplies the same thing from PipeWire.
+//
+// This is the one place the app's own code is rewritten, and only in memory:
+// the file on disk is untouched, so a Granola update simply replaces it. If a
+// future build changes the shape, the pattern stops matching and the app loads
+// verbatim, auto-detection goes away, nothing breaks. Set
+// GRANOLA_MIC_MONITOR=0 to skip it entirely.
+const LINUX_MIC_ARM = /(process\.platform===`win32`\?[A-Za-z0-9_$]+:)e=>\(e\(\[\]\),\(\)=>\{\}\)/;
+let mainSource = fs.readFileSync(mainPath, "utf8");
+
+if (process.env.GRANOLA_MIC_MONITOR !== "0") {
+  if (LINUX_MIC_ARM.test(mainSource)) {
+    try {
+      globalThis.__granolaLinuxMicMonitor = require("./mic-monitor-linux.js").subscribe;
+      mainSource = mainSource.replace(LINUX_MIC_ARM, "$1globalThis.__granolaLinuxMicMonitor");
+      log("meeting auto-detection: PipeWire monitor injected");
+    } catch (err) {
+      console.warn("[stub] could not load the PipeWire mic monitor:", err.message);
+    }
+  } else {
+    console.warn(
+      "[stub] meeting auto-detection unavailable: the platform switch in main no longer " +
+      "matches the known shape (Granola update?). The app still runs; recording by hand works."
+    );
+  }
+}
+
 log(`loading main: ${mainPath}`);
-require(mainPath);
+// Compiled by hand rather than require()d so the source above can differ from
+// the file. __dirname, require and module.exports all behave as usual.
+const mainModule = new Module(mainPath, null);
+mainModule.filename = mainPath;
+mainModule.paths = Module._nodeModulePaths(path.dirname(mainPath));
+require.cache[mainPath] = mainModule;
+mainModule._compile(mainSource, mainPath);
+mainModule.loaded = true;

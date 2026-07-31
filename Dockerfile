@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
     libpango-1.0-0 libcairo2 libgtk-3-0 libx11-xcb1 libxcb-dri3-0 \
     libpulse0 pulseaudio-utils python3 make g++ ca-certificates \
+    # pw-dump: meeting auto-detection reads which apps hold the microphone
+    pipewire-bin \
     # GL/EGL: without these Chromium's GPU process dies with
     # "Could not dlopen libGL.so.1" and the window renders black
     libgl1 libglx-mesa0 libegl1 libgles2 libglapi-mesa libgl1-mesa-dri \

@@ -45,17 +45,23 @@ fi
 # Granola. Take it from the user's own extraction instead, the same way the
 # application itself is handled. The asset name carries a content hash that
 # changes between Granola releases, hence the glob.
-ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/1024x1024/apps"
+# 512x512 and not the asset's native 1024x1024: icon lookup only visits the
+# size directories the hicolor theme declares, and its index stops at 512. An
+# icon in an undeclared directory exists but is invisible to launchers, which
+# then fall back to a blank entry. The larger image is simply scaled down.
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+ICON_DIR="$DATA_HOME/icons/hicolor/512x512/apps"
 if [[ ! -f "$ICON_DIR/granola-for-linux.png" ]]; then
     icon=$(ls "$APP"/dist-app/assets/granola_app_icon-*.png 2>/dev/null | head -1 || true)
     if [[ -n "$icon" ]]; then
-        mkdir -p "$ICON_DIR"
+        mkdir -p "$ICON_DIR" "$DATA_HOME/pixmaps"
         cp "$icon" "$ICON_DIR/granola-for-linux.png"
         # legacy location too, for launchers that do not walk the hicolor theme
-        mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/pixmaps"
-        cp "$icon" "${XDG_DATA_HOME:-$HOME/.local/share}/pixmaps/granola-for-linux.png"
+        cp "$icon" "$DATA_HOME/pixmaps/granola-for-linux.png"
+        # drop the 1024x1024 copy earlier versions wrote into an unindexed dir
+        rm -rf "$DATA_HOME/icons/hicolor/1024x1024"
         command -v gtk-update-icon-cache >/dev/null 2>&1 &&
-            gtk-update-icon-cache -qtf "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" 2>/dev/null || true
+            gtk-update-icon-cache -qtf "$DATA_HOME/icons/hicolor" 2>/dev/null || true
     fi
 fi
 

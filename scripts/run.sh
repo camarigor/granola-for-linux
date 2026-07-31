@@ -92,6 +92,8 @@ docker run --rm ${DOCKER_TTY:--it} \
     -v "$DATA_DIR:$CONTAINER_DATA_DIR" \
     -v "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse:/run/pulse:ro" \
     -e PULSE_SERVER=unix:/run/pulse/native \
+    -e XDG_RUNTIME_DIR=/run/user-host \
+    -v "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}:/run/user-host:ro" \
     "${SQLITE_MOUNT[@]}" \
     --device /dev/dri \
     "$IMAGE" \
