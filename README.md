@@ -111,6 +111,24 @@ bundle's own is a macOS binary, and a stock Linux build would still be missing
 what Granola's private fork adds). A marker file makes that re-apply by itself
 whenever a newer Granola is extracted.
 
+### Updating Granola
+
+Download the new `.dmg` and hand it to the launcher again:
+
+```bash
+granola-for-linux ~/Downloads/"Granola - AI Notepad.dmg"
+```
+
+Passing a `.dmg` always re-extracts. The new tree is unpacked beside the
+current one and swapped in, so a failure part way through cannot leave a broken
+install; the Linux SQLite module then reinstalls itself, because the fresh copy
+arrives without the marker. Your notes and session are untouched, they live in
+`~/.config/Granola`, not in the extracted app.
+
+Updating the `.deb` itself (new stubs, new fixes) is a normal
+`sudo apt install ./granola-for-linux_*.deb` and does not touch the extracted
+app.
+
 ## Layout
 
 ```

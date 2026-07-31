@@ -109,4 +109,6 @@ else
     echo "          (installing straight from \$HOME works too, but apt warns that"
     echo "           its '_apt' user cannot read through a 750 home directory)"
 fi
-echo "use:      granola-for-linux ~/Downloads/'Granola - AI Notepad.dmg'   (first run only)"
+echo "use:      granola-for-linux ~/Downloads/'Granola - AI Notepad.dmg'"
+echo "          (installs Granola from your own .dmg; pass a newer one to update)"
+echo "then:     granola-for-linux"

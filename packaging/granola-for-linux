@@ -13,31 +13,55 @@ MARKER=".granola-for-linux"
 
 die() { echo "granola-for-linux: $*" >&2; exit 1; }
 
-# -- first run: needs the .dmg ------------------------------------------------
-if [[ ! -d "$APP" ]]; then
-    DMG="${1:-}"
-    # Consume the argument only if it really is the .dmg; anything else (a
-    # granola:// callback, an Electron flag) has to reach the app untouched.
-    if [[ -n "$DMG" && "$DMG" == *.dmg ]]; then
-        shift
-    else
-        # try the obvious locations first
-        DMG=$(ls -t "$HOME"/Downloads/*ranola*.dmg "$HOME"/Downloads/*.dmg 2>/dev/null | head -1 || true)
-    fi
+# -- install or update from a .dmg --------------------------------------------
+# Passing a .dmg always (re)extracts, which is how Granola is updated: download
+# the new .dmg and run it through here again. Only consume the argument when it
+# really is a .dmg, a granola:// callback or an Electron flag has to reach the
+# app untouched.
+DMG=""
+if [[ "${1:-}" == *.dmg ]]; then
+    DMG="$1"
+    shift
+elif [[ ! -d "$APP" ]]; then
+    # nothing installed yet and no .dmg named: try the obvious location
+    DMG=$(ls -t "$HOME"/Downloads/*ranola*.dmg "$HOME"/Downloads/*.dmg 2>/dev/null | head -1 || true)
     [[ -n "$DMG" && -f "$DMG" ]] || die "first run needs the official .dmg:
     granola-for-linux /path/to/'Granola - AI Notepad.dmg'
   (download it from https://www.granola.ai/download - this package does not ship it)"
+fi
 
-    command -v 7z >/dev/null || die "7z missing (apt install p7zip-full)"
+if [[ -n "$DMG" ]]; then
+    [[ -f "$DMG" ]] || die "no such file: $DMG"
+    command -v 7z >/dev/null || die "7z missing (apt install 7zip)"
+
+    updating=false
+    [[ -d "$APP" ]] && updating=true
     echo "granola-for-linux: extracting $(basename "$DMG") ..."
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
     7z x -y -o"$tmp" "$DMG" 'Granola/Granola.app/Contents/Resources/*' >/dev/null
     asar="$tmp/Granola/Granola.app/Contents/Resources/app.asar"
     [[ -f "$asar" ]] || die "app.asar not found - is this really the Granola .dmg?"
 
+    # Unpack beside the current install and swap, so a failure half way through
+    # cannot leave a broken app behind.
     mkdir -p "$DATA"
-    "$PREFIX/bin/asar-extract" "$asar" "$APP" || die "failed to unpack app.asar"
-    echo "granola-for-linux: app extracted to $APP"
+    rm -rf "$APP.incoming"
+    "$PREFIX/bin/asar-extract" "$asar" "$APP.incoming" || die "failed to unpack app.asar"
+    rm -rf "$APP.previous"
+    [[ -d "$APP" ]] && mv "$APP" "$APP.previous"
+    mv "$APP.incoming" "$APP"
+    rm -rf "$APP.previous"
+
+    if $updating; then
+        # The new tree carries Granola's own macOS sqlite again, and no marker,
+        # so the swap below reinstalls the Linux build by itself.
+        echo "granola-for-linux: updated from $(basename "$DMG")"
+        version=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version","?"))' \
+            "$APP/package.json" 2>/dev/null || true)
+        [[ -n "$version" ]] && echo "granola-for-linux: now running Granola $version"
+    else
+        echo "granola-for-linux: app extracted to $APP"
+    fi
 fi
 
 # -- desktop icon --------------------------------------------------------------
