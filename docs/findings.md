@@ -69,6 +69,32 @@ main                       preload
 
 `speaker_embedding_process` sugere que parte da diarização roda **local**.
 
+## Fase 1, obstáculos encontrados e resolvidos (2026-07-31)
+
+Rodando `electron loader.js` com o app extraído, na ordem em que apareceram:
+
+| # | Sintoma | Causa | Solução |
+|---|---|---|---|
+| 1 | `USER granola` não existe | uid 1000 já é do usuário `node` na imagem base | usar `USER ${UID}` numérico |
+| 2 | `Electron failed to install correctly` | postinstall do npm não baixou o binário; em runtime não há permissão de escrita | baixar o zip do release oficial no build |
+| 3 | Janela **preta**, `Exiting GPU process` | faltava `libGL.so.1` no container | instalar `libgl1 libglx-mesa0 libegl1 libgles2 libglapi-mesa libgl1-mesa-dri` |
+| 4 | `net::ERR_FAILED` em todo `app://ui/...` | o handler usa `net.fetch('file://…')`, que o Chromium recusa aqui mesmo com o arquivo presente e legível | o loader intercepta `protocol.handle` e serve do disco (`serveFromDisk`) |
+| 5 | `better_sqlite3.node: invalid ELF header` | binário Mach-O; e o hook de require do loader **não alcança o renderer**, que carrega o `.node` sozinho | compilar `better-sqlite3-multiple-ciphers` contra os headers do Electron e **sobrepor por bind-mount** no container |
+
+Detalhes que custaram tempo e valem registrar:
+
+- **Versão do Electron**: `CFBundleVersion` do `Electron Framework.framework/Versions/A/Resources/Info.plist` → **42.7.0**. O `CFBundleShortVersionString` vem vazio.
+- **Compilação do sqlite**: `npm install --runtime=electron --target=...` **não** funciona (npm não repassa ao node-gyp); é preciso `npm_config_runtime` / `npm_config_target` / `npm_config_disturl` como variáveis de ambiente. Além disso, a versão do bundle (12.9.0) **não compila** contra o V8 do Electron 42 (erros `SetNativeDataProperty ambiguous`, `External::Value()`); a **12.11.1** compila e é compatível.
+- **`process.resourcesPath` e `app.getAppPath()`** apontam para o diretório do Electron quando se roda `electron <script>`; ambos precisam ser redirecionados para o app extraído.
+- **Screenshot de janela no i3 não é prova**: janela em workspace não visível é capturada como preta mesmo estando saudável. Validar por log (`ERR_FAILED`, `Uncaught`) em vez da imagem.
+
+### Estado ao fim da Fase 1
+
+Com tudo acima aplicado: app inicia, `primary-window-created` + `ready-to-show`, protocolo `app://` serve os 322 assets, sqlite carrega, e o log fica **sem nenhum erro de JavaScript**. Registros do próprio app confirmam a inicialização completa:
+`app-started {"wasFirstLaunch":true}`, `auth-electron-user-logged-in {"loggedIn":false}`, `system-info` com a CPU correta.
+
+**Nenhum stub nativo foi chamado até aqui**, ou seja, a UI monta sem depender dos módulos macOS. Eles só devem entrar em cena no login e, principalmente, na gravação (Fase 2).
+
 ## Pendências de investigação
 
 1. **Versão do Electron do bundle**, ainda não determinada. `package.json` não

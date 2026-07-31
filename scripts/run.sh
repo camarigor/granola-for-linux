@@ -19,8 +19,26 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "ERRO: rode ./scripts/bu
 XSOCK=/tmp/.X11-unix
 XAUTH_HOST="${XAUTHORITY:-$HOME/.Xauthority}"
 
+# O hook de require do loader só vale no processo principal; o renderer carrega
+# os .node por conta própria. Sobrepomos o binário macOS pelo build Linux via
+# bind-mount, o app no disco do host continua intacto.
+NATIVE_DIR="$WORK/native-linux"
+SQLITE_REL="node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node"
+if [[ ! -f "$NATIVE_DIR/better_sqlite3.node" ]]; then
+    echo "[run] extraindo build Linux do sqlite da imagem ..."
+    mkdir -p "$NATIVE_DIR"
+    cid=$(docker create "$IMAGE")
+    docker cp "$cid:/opt/native-linux/better_sqlite3.node" "$NATIVE_DIR/" >/dev/null
+    docker rm "$cid" >/dev/null
+fi
+
+SQLITE_MOUNT=()
+if [[ -f "$NATIVE_DIR/better_sqlite3.node" && -f "$APP/$SQLITE_REL" ]]; then
+    SQLITE_MOUNT=(-v "$NATIVE_DIR/better_sqlite3.node:/app/granola/$SQLITE_REL:ro")
+fi
+
 echo "[run] subindo Electron no container ..."
-docker run --rm -it \
+docker run --rm ${DOCKER_TTY:--it} \
     -e DISPLAY="${DISPLAY:-:0}" \
     -e XAUTHORITY=/tmp/.docker.xauth \
     -e ELECTRON_ENABLE_LOGGING=1 \
@@ -32,6 +50,7 @@ docker run --rm -it \
     -v "$ROOT/stubs:/app/stubs:ro" \
     -v "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse:/run/pulse:ro" \
     -e PULSE_SERVER=unix:/run/pulse/native \
+    "${SQLITE_MOUNT[@]}" \
     --device /dev/dri \
     "$IMAGE" \
-    -c "cd /app && ./node_modules/.bin/electron /app/stubs/loader.js --no-sandbox 2>&1 | tail -80"
+    -c "cd /app && exec /opt/electron/electron /app/stubs/loader.js --no-sandbox 2>&1"
