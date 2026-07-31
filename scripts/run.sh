@@ -54,6 +54,37 @@ if [[ -d "$NATIVE_DIR/better-sqlite3-multiple-ciphers" && -d "$APP/$SQLITE_PKG" 
     SQLITE_MOUNT=(-v "$NATIVE_DIR/better-sqlite3-multiple-ciphers:/app/granola/$SQLITE_PKG:ro")
 fi
 
+# ── Persistent app data ──────────────────────────────────────────────────────
+# Electron keeps userData under $XDG_CONFIG_HOME/<appName>; launched as
+# `electron loader.js` the app is unpackaged, so the name is "Electron".
+# Without this volume the SQLite database and the auth tokens live inside the
+# container and every restart forces a fresh login.
+DATA_DIR="$WORK/app-data"
+mkdir -p "$DATA_DIR"
+
+# ── URL bridge (container -> host browser) ───────────────────────────────────
+# There is no browser inside the container, so the loader intercepts
+# shell.openExternal and drops each URL as a file here; this watcher opens it
+# on the host, where the user's real browser and sessions live. Login depends
+# on this: the OAuth page must open in the host browser.
+BRIDGE_DIR="$WORK/bridge"
+mkdir -p "$BRIDGE_DIR"
+rm -f "$BRIDGE_DIR"/open-*.url "$BRIDGE_DIR"/open-*.tmp
+(
+    while true; do
+        for f in "$BRIDGE_DIR"/open-*.url; do
+            [[ -e "$f" ]] || continue
+            url=$(<"$f")
+            rm -f "$f"
+            echo "[bridge] opening on host: ${url:0:120}"
+            xdg-open "$url" >/dev/null 2>&1 || echo "[bridge] xdg-open failed: $url"
+        done
+        sleep 0.5
+    done
+) &
+BRIDGE_WATCHER=$!
+trap 'kill "$BRIDGE_WATCHER" 2>/dev/null || true' EXIT
+
 echo "[run] starting Electron in the container ..."
 docker run --rm ${DOCKER_TTY:--it} \
     -e DISPLAY="${DISPLAY:-:0}" \
@@ -65,6 +96,9 @@ docker run --rm ${DOCKER_TTY:--it} \
     -e GRANOLA_APP_DIR=/app/granola \
     -v "$APP:/app/granola" \
     -v "$ROOT/stubs:/app/stubs:ro" \
+    -e GRANOLA_BRIDGE_DIR=/app/bridge \
+    -v "$BRIDGE_DIR:/app/bridge" \
+    -v "$DATA_DIR:/home/electron-cache/.config/Electron" \
     -v "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse:/run/pulse:ro" \
     -e PULSE_SERVER=unix:/run/pulse/native \
     "${SQLITE_MOUNT[@]}" \
