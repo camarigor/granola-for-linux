@@ -1,159 +1,349 @@
 # granola-for-linux
 
-Running the **Granola** client (macOS, Electron) on Linux.
+Run the **Granola** meeting notepad on Linux. Recording, live transcription,
+automatic notes, calendar sync and meeting auto-detection all work.
 
-> **This repository contains no Granola code, binaries or assets.**
-> The app is proprietary. The scripts here extract **your own copy** from the
-> official `.dmg`, on your machine, and patch it at runtime. Nothing from the
-> app is redistributed, and the bundle itself is never modified.
+Granola ships for macOS and Windows only. This project makes the macOS build
+run on Linux, using **your own copy** of the app.
 
-## Why this is feasible (and where it stalls)
+## Why
 
-Granola is an Electron app, so the product logic is JavaScript and runs
-anywhere. What is macOS-specific are **15 native modules** (`.node`, Mach-O,
-closed source) under `Contents/Resources/native/`.
+Every few months another AI product launches, and the download page offers
+macOS and Windows. Linux gets a shrug, a "coming soon" that never arrives, or a
+web app with half the features. The engineers building these tools very often
+develop on Linux themselves, so the exclusion is a product decision rather than
+a technical one.
 
-Survey of v7.452.1 (see `docs/findings.md`):
+It is especially galling with Electron apps. Electron **is** Chromium plus
+Node, and both run on Linux natively. When a company ships an Electron app for
+two platforms and not the third, nothing is blocking them. They simply decided
+we are not worth a build target.
 
-| Signal | Value | Reading |
-|---|---|---|
-| `process.platform` in main | 229 occurrences | platform-specific logic is extensive |
-| `darwin` / `win32` / `linux` strings | 142 / **124** / 19 | **a Windows layer already exists**, the architecture is cross-platform |
-| native modules | 15 (all Mach-O) | need a Linux equivalent or a stub |
-| audio capture | ScreenCaptureKit + CoreAudio + AVFoundation | the only genuinely hard part |
+Granola turned out to prove that point precisely. Its product logic is
+JavaScript and platform agnostic. What is macOS specific are a handful of
+native modules, and a Windows layer **already exists** in the same bundle:
 
-In other words: porting is **not** rewriting the product, it is writing the
-third implementation of the native layer (macOS → Windows → Linux).
+| Signal in v7.452.1 | Value | Reading |
+|:--|:--|:--|
+| `process.platform` in the main bundle | 229 occurrences | platform specific logic is extensive |
+| `darwin` / `win32` / `linux` strings | 142 / **124** / 19 | a Windows layer is already there |
+| native modules | 15, all Mach-O | need Linux equivalents or stubs |
+
+So porting was never "rewrite the product". It was writing the third
+implementation of a native layer that already had two. As it turned out, most
+of it was not needed at all, because the app has a browser based audio capture
+path that covers both the microphone and system audio.
+
+This is what one person plus an afternoon of reverse engineering produced. A
+company with a payroll could have done it in a sprint.
+
+## What this does to Granola, please read
+
+**No Granola code, binary or asset is in this repository, and none is
+redistributed.** You supply the official `.dmg`, downloaded from granola.ai by
+you. Everything here is our own code.
+
+That said, **this does modify how Granola runs**, and you should know exactly
+how before you trust it with your meetings.
+
+| What | Where | Why |
+|:--|:--|:--|
+| Native module loads are intercepted | in memory, at runtime | the macOS `.node` files cannot load on Linux, so JavaScript stand ins take their place |
+| `resourcesPath`, `getAppPath`, the app name and version are redirected | in memory | an unpackaged Electron reports its own paths, and the app would look for its assets in the wrong place |
+| The `app://` protocol handler serves from disk | in memory | the app's own handler uses a fetch that Chromium refuses here |
+| **One expression in the main bundle is rewritten** | in memory, before execution | the platform switch hands Linux a dead arm, so meeting auto-detection could never run. See "How it works" below |
+| **The SQLite module is replaced** | on disk, in *your extracted copy* | the bundled one is a macOS binary, and ours is built for Linux with the two compile time features Granola's private fork relies on |
+
+The `.dmg` you downloaded is never touched. The extracted copy under
+`~/.local/share/granola-for-linux/` is yours, and the SQLite swap happens
+there. Every other change lives in memory for the lifetime of the process, so a
+Granola update simply replaces the files and the port keeps working.
+
+**This is unofficial.** Granola Labs does not support it, has not endorsed it,
+and owes you nothing if it breaks. If something misbehaves, reproduce it on
+macOS before reporting it to them, because it is far more likely to be our
+problem than theirs.
 
 ## Status
 
-**Phase 1 (app boots), done.** The window opens, the UI renders, SQLite
-initialises and migrates, and the app reaches its login screen with no errors.
+| Feature | State |
+|:--|:--|
+| App launches, UI renders | works |
+| Sign in with Google | works, no manual step |
+| Sign in with Microsoft | works, no manual step |
+| Calendar sync, note sync | works |
+| Recording (microphone and system audio) | works |
+| Live transcription | works |
+| Automatic note generation | works |
+| Meeting auto-detection | works, needs `pipewire-bin` |
+| Google Meet consent overlay | **not available**, needs a macOS helper binary |
 
-**Phase 1.5 (login), done.** Google sign-in completes and the account syncs
-(preferences, document lists). The backend accepts a non-official client. Two
-shims make it work: the loader bridges `shell.openExternal` out to the host
-browser, and re-injects the `granola://` callback the browser cannot route back.
+Tested on Ubuntu 24.04 with Granola 7.452.1 and Electron 42.7.0.
 
-**Phase 2 (recording), works.** Recording, live transcription and automatic
-note generation all run on Linux. The app turned out to have a browser-based
-capture path (`capture_method: browser`) covering both the microphone and
-system audio, so porting `granola.node` was not required. Because capture
-happens at the OS audio layer, Teams, Zoom and Meet are all equivalent.
+Every obstacle met along the way, with its cause and fix, is written up in
+[`docs/findings.md`](docs/findings.md).
 
-**Phase 3 (packaging), done.** The `.deb` installs on Ubuntu 24.04, extracts
-the app from your own `.dmg`, and **signs in with no manual step**: the browser
-hands the `granola://` callback straight back through the registered scheme
-handler.
+## Install, the recommended path
 
-**Phase 4 (meeting auto-detection), next.** A PipeWire equivalent of the macOS
-monitor that reports which applications currently hold the microphone. It is
-the one remaining feature that genuinely needs a `granola.node`.
+### 1. Get the package
 
-See `docs/findings.md` for every obstacle, its cause and its fix.
+Download `granola-for-linux_*_amd64.deb` from the releases page, or build it
+yourself (see [Building](#building-the-package-yourself)).
 
-## Requirements
-
-- Docker (the whole toolchain runs in a container, **nothing is installed on the host**)
-- `p7zip` on the host (to read the `.dmg`)
-- Your own copy of `Granola - AI Notepad.dmg`
-
-## Usage, development (container)
+### 2. Install it
 
 ```bash
-# 1. extract the .dmg into work/ (never versioned)
-./scripts/extract.sh ~/Downloads/"Granola - AI Notepad.dmg"
-
-# 2. map native modules and platform-specific logic
-./scripts/analyze.sh
-
-# 3. build the Electron environment
-./scripts/build-env.sh
-
-# 4. launch with stubs applied (window via the host X11)
-./scripts/run.sh
+sudo apt install ./granola-for-linux_0.1.0_amd64.deb
 ```
 
-### Signing in
-
-`run.sh` opens auth URLs in your host browser automatically. The callback
-cannot come back on its own (the host has no `granola://` handler), so hand it
-over once, while the app is still waiting on its "signing in" screen:
+If apt complains that its `_apt` user cannot read the file, your home directory
+is not world traversable. That is normal and harmless, but to keep the output
+clean:
 
 ```bash
-./scripts/deliver-callback.sh '<URL from the address bar on the "Opening Granola..." page>'
+cp granola-for-linux_0.1.0_amd64.deb /tmp/
+sudo apt install /tmp/granola-for-linux_0.1.0_amd64.deb
 ```
 
-Three rules, each learned the hard way (see `docs/findings.md`):
+Dependencies come from your distribution. `pipewire-bin` is a `Recommends`,
+because it provides `pw-dump`, which meeting auto-detection reads. Without it
+everything else still works and you start recordings by hand.
 
-- **One tab per sign-in.** A second concurrent flow makes Google fail with
-  "Something went wrong".
-- **Within 15 minutes.** The auth `state` is a JWT with a 900 s lifetime; past
-  that WorkOS answers "Invalid state".
-- **Do not close or restart the app** in between, the callback is only
-  accepted while the renderer sits on `/login-in-progress`.
+### 3. Point it at your Granola download
 
-## Usage, .deb package
-
-```bash
-./packaging/build-deb.sh          # built inside a container
-sudo apt install ./dist/granola-for-linux_0.1.0_amd64.deb
-granola-for-linux ~/Downloads/"Granola - AI Notepad.dmg"   # first run only
-```
-
-After the first run, `granola-for-linux` or the **Granola (Linux)** menu entry is
-enough. The `.deb` ships the Electron runtime, our stubs and the Linux SQLite
-module; the Granola app is extracted from your `.dmg` into
-`~/.local/share/granola-for-linux/` and never goes into the package.
-
-The SQLite module is swapped into the extracted copy on first launch (the
-bundle's own is a macOS binary, and a stock Linux build would still be missing
-what Granola's private fork adds). A marker file makes that re-apply by itself
-whenever a newer Granola is extracted.
-
-### Updating Granola
-
-Download the new `.dmg` and hand it to the launcher again:
+Download the macOS `.dmg` from <https://www.granola.ai/download>, then:
 
 ```bash
 granola-for-linux ~/Downloads/"Granola - AI Notepad.dmg"
 ```
 
-Passing a `.dmg` always re-extracts. The new tree is unpacked beside the
-current one and swapped in, so a failure part way through cannot leave a broken
-install; the Linux SQLite module then reinstalls itself, because the fresh copy
-arrives without the marker. Your notes and session are untouched, they live in
-`~/.config/Granola`, not in the extracted app.
+This unpacks the app into `~/.local/share/granola-for-linux/app-src`, installs
+the Linux SQLite module into it, lifts the application icon out of it, and
+launches.
 
-Updating the `.deb` itself (new stubs, new fixes) is a normal
-`sudo apt install ./granola-for-linux_*.deb` and does not touch the extracted
-app.
+### 4. From then on
+
+```bash
+granola-for-linux
+```
+
+or the **Granola (Linux)** entry in your application menu.
+
+### Signing in
+
+Click sign in, complete it in the browser that opens, and you are done. The
+package registers `x-scheme-handler/granola`, so the OAuth callback comes back
+to the app by itself. Google and Microsoft both work.
+
+Your browser will ask whether to open "Granola (Linux)". That prompt *is* the
+callback arriving. Allow it.
+
+### Updating Granola
+
+Download the new `.dmg` and pass it in again:
+
+```bash
+granola-for-linux ~/Downloads/"Granola - AI Notepad.dmg"
+```
+
+Passing a `.dmg` always re extracts. The new tree is unpacked alongside the old
+one and swapped in at the end, so an interrupted update cannot leave a broken
+install, and the Linux SQLite module reinstalls itself. Your notes, settings
+and session are untouched, because they live in `~/.config/Granola` rather than
+in the app.
+
+Updating this project (new fixes) is an ordinary
+`sudo apt install ./granola-for-linux_*.deb`, and does not disturb the
+extracted app.
+
+### Where things live
+
+| Path | Contents |
+|:--|:--|
+| `/opt/granola-for-linux/` | Electron, our stubs, the Linux SQLite module |
+| `~/.local/share/granola-for-linux/app-src/` | Granola, extracted from your `.dmg` |
+| `~/.config/Granola/` | your notes, tokens and settings |
+
+Removing the package leaves the last two in place. Delete them by hand if you
+want them gone.
+
+## Run with Docker
+
+The container needs no installation on the host beyond Docker itself, because
+Electron, Node and the toolchain all live in the image. This is how the port
+was developed, and it is useful for trying things without touching your system.
+
+Note that the container is the **development** environment. Signing in needs
+one manual step there, because a browser on the host cannot hand a `granola://`
+callback into a container.
+
+### 1. Get the image
+
+Pull the published image:
+
+```bash
+docker pull ghcr.io/camarigor/granola-for-linux:latest
+docker tag ghcr.io/camarigor/granola-for-linux:latest granola-for-linux:dev
+```
+
+Or build it. Electron and the SQLite module are compiled inside, which takes a
+few minutes:
+
+```bash
+git clone https://github.com/camarigor/granola-for-linux
+cd granola-for-linux
+./scripts/build-env.sh
+```
+
+### 2. Extract your `.dmg`
+
+```bash
+./scripts/extract.sh ~/Downloads/"Granola - AI Notepad.dmg"
+```
+
+Unpacks into `work/app-src/`, which is never versioned. Needs `7z` on the host
+(`sudo apt install 7zip`).
+
+Optionally, survey what the bundle contains:
+
+```bash
+./scripts/analyze.sh
+```
+
+### 3. Run
+
+```bash
+./scripts/run.sh
+```
+
+The window opens on your X11 display. The script wires up, into the container:
+the X11 socket, PulseAudio, PipeWire, `/dev/dri` for GPU acceleration, the
+extracted app, our stubs, and `work/app-data` as persistent storage so your
+session survives restarts.
+
+Useful switches:
+
+| Variable | Effect |
+|:--|:--|
+| `GRANOLA_STUB_VERBOSE=0` | quieten our own log lines |
+| `GRANOLA_TRACE_CONSOLE=0` | do not expand the app's log objects over the DevTools protocol |
+| `GRANOLA_MIC_MONITOR=0` | leave meeting auto-detection out |
+| `GRANOLA_DEVTOOLS=1` | allow React and Redux DevTools to load (they hang startup, see findings) |
+
+### 4. Sign in, container only
+
+The app opens the auth URL in your real browser through a bridge. When the
+browser lands on **"Opening Granola..."**, copy the address bar and hand it
+over, *while the app is still waiting on its sign in screen*:
+
+```bash
+./scripts/deliver-callback.sh 'https://www.granola.ai/app-redirect?code=...'
+```
+
+Three rules, each learned the hard way:
+
+* **One tab per sign in.** A second concurrent flow makes Google fail with
+  "Something went wrong".
+* **Finish within 15 minutes.** The auth `state` is a JWT with a 900 second
+  lifetime, and after that WorkOS answers "Invalid state".
+* **Do not close or restart the app** in between, because the callback is only
+  accepted while the app sits on `/login-in-progress`.
+
+Install the `.deb` and none of this applies, since the scheme handler does it
+for you.
+
+### Building the package yourself
+
+```bash
+./packaging/build-deb.sh
+```
+
+Runs entirely in a container and writes `dist/granola-for-linux_*_amd64.deb`.
+It compiles the SQLite module with the same recipe the image uses
+(`scripts/build-sqlite.sh`), so the two can never drift.
+
+## How it works
+
+`stubs/loader.js` is launched instead of the app, and prepares the ground
+before handing over.
+
+**Native modules.** It replaces Node's `.node` loader. Requires for Granola's
+macOS modules resolve to JavaScript stand ins in `stubs/modules/`, while
+genuine third party natives get a Linux build. An unknown module returns a
+proxy that throws a descriptive error on use, so one run reveals everything
+missing rather than dying at the first.
+
+**Identity and paths.** An unpackaged Electron calls itself "Electron" and
+points `resourcesPath` at its own directory. The loader adopts the app's real
+name and version from its `package.json`, so settings land in
+`~/.config/Granola` rather than a directory shared with every other unpackaged
+Electron app.
+
+**Assets.** The app serves its UI over an `app://` protocol using a fetch that
+Chromium refuses here. The loader serves those files from disk first.
+
+**Sign in.** `api.granola.ai/v1/auth` answers HTTP 500 for any `platform` other
+than `macos` or `windows`. Both `linux` and even `darwin` fail, so the loader
+rewrites the value. We are running the genuine macOS bundle, so this is
+accurate rather than a lie. In the container it also bridges the URL out to the
+host browser and the callback back in.
+
+**SQLite.** Granola ships a private fork of `better-sqlite3-multiple-ciphers`
+whose two extras are its reactive data layer: `tables_used()`, a table valued
+function needing `SQLITE_ENABLE_BYTECODE_VTAB` at compile time, and
+`updateHook()`, which no public version has. Ours is compiled with the flag,
+and `stubs/sqlite-updatehook-shim.js` implements the hook for real, so writes
+report their tables through `tables_used()`. Without it the app runs on stale
+reads and generating notes fails with a 404.
+
+**Meeting auto-detection.** Granola notices a call by watching which
+applications hold the microphone. The platform switch hands Linux an arm that
+reports "nobody" once and gives up, so the loader rewrites that one expression
+in memory to point at `stubs/mic-monitor-linux.js`, which polls `pw-dump` and
+maps Linux executables onto the Apple bundle identifiers the app expects. That
+is the same thing the bundle's own Windows monitor does with `chrome.exe`.
+
+The rewrite is anchored on a pattern verified to match exactly once. If a
+future Granola changes shape, it stops matching, the app loads verbatim, and
+only auto-detection is lost. Nothing fails silently.
 
 ## Layout
 
 ```
-scripts/    extraction, analysis, container build and run (development)
-packaging/  .deb: launcher, desktop entry, control file, containerised build
-stubs/      loader plus JS replacements for the macOS native modules
-docs/       reverse-engineering findings
-work/       (ignored) extracted app, your copy, never versioned
-dist/       (ignored) generated .deb
+scripts/     extraction, analysis, container build and run, callback delivery
+packaging/   .deb: launcher, desktop entry, control, maintainer scripts, build
+stubs/       loader, JS replacements for the macOS natives, sqlite shim,
+             PipeWire microphone monitor
+docs/        reverse engineering findings: every obstacle, cause and fix
+work/        (ignored) your extracted app and its data
+dist/        (ignored) the built .deb
 ```
 
-## Design notes
+## Troubleshooting
 
-- **The bundle is never patched.** `stubs/loader.js` hooks
-  `Module._extensions['.node']` and injects replacements at runtime, so a
-  Granola update does not undo our work, and any integrity check the app runs
-  still sees an untouched bundle.
-- **`granola.js` is instrumented rather than faked.** It logs every call
-  (method name, argument types) and answers callbacks with silence, so running
-  the app reveals the audio-capture contract needed for Phase 2.
-- **Third-party natives are overridden by bind-mount**, not by copying over the
-  app: the loader's require hook does not reach the renderer process, which
-  loads `.node` files on its own.
+**The app opens but nothing happens when I click sign in.** An instance is
+probably already running. It holds a single instance lock, and later launches
+exit quietly. Check with `pgrep -af granola-for-linux`.
+
+**The browser says it cannot open `granola://`.** The scheme handler is not
+registered. Reinstall the package, or run
+`update-desktop-database ~/.local/share/applications`.
+
+**Meeting auto-detection never fires.** Install `pipewire-bin` and confirm
+`pw-dump` runs. Start from a terminal with `GRANOLA_STUB_VERBOSE=1` and look
+for `meeting auto-detection: PipeWire monitor injected` on startup.
+
+**No icon in my launcher.** It is lifted from the extracted app on first run
+into `~/.local/share/icons/hicolor/512x512/apps/`. If you installed before that
+was added, run once with the `.dmg` again.
+
+**Sign in fails with "Invalid state".** The auth token expired, because a tab
+was left sitting for over 15 minutes. Start again.
 
 ## Licence
 
-Code in this repository: MIT. This does not extend to Granola itself, which
-remains the property of Granola Labs, Inc.
+Code in this repository is MIT. That covers our code only.
+
+Granola is the property of Granola Labs, Inc., is not licensed to us or to you
+by this repository, and is not distributed here. You need your own copy and
+your own account, and your use of it is governed by their terms.
