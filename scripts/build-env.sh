@@ -7,11 +7,14 @@ IMAGE="granola-for-linux:dev"
 
 # The Electron version must match the bundle's; see docs/findings.md for how
 # to read it. Override with: ELECTRON_VERSION=42.7.0 ./scripts/build-env.sh
-ELECTRON_VERSION="${ELECTRON_VERSION:-32.2.7}"
+ELECTRON_VERSION="${ELECTRON_VERSION:-42.7.0}"
 
 echo "[build-env] building $IMAGE (electron $ELECTRON_VERSION) ..."
+# The ABI arg keeps the sqlite native build in lockstep with the runtime:
+# mismatched values would load a module compiled for a different V8.
 docker build \
     --build-arg "ELECTRON_VERSION=$ELECTRON_VERSION" \
+    --build-arg "ELECTRON_VERSION_FOR_ABI=$ELECTRON_VERSION" \
     --build-arg "UID=$(id -u)" \
     -t "$IMAGE" "$ROOT"
 

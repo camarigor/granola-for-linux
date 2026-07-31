@@ -21,16 +21,26 @@ WORKDIR /app
 # it against the Electron headers; the loader redirects the require.
 ARG SQLITE_PKG_VERSION=12.11.1
 ARG ELECTRON_VERSION_FOR_ABI=42.7.0
-# npm does not reliably forward --runtime/--target to node-gyp; the
-# npm_config_* environment variables are what actually works (otherwise it
-# builds against Node headers and breaks on the V8 API).
-RUN npm_config_runtime=electron \
-    npm_config_target=${ELECTRON_VERSION_FOR_ABI} \
-    npm_config_disturl=https://electronjs.org/headers \
-    npm_config_build_from_source=true \
-    npm_config_arch=x64 \
-    npm install --no-save \
-        better-sqlite3-multiple-ciphers@${SQLITE_PKG_VERSION} \
+# Install with --ignore-scripts (download only), patch SQLite's compile-time
+# options, then compile once with node-gyp called directly, its CLI flags DO
+# reach the build (npm install is what fails to forward them).
+#
+# SQLITE_ENABLE_BYTECODE_VTAB: Granola's cacheStore queries tables_used(), a
+# SQLite table-valued function that only exists under this flag. Their private
+# sqlite fork enables it; the public package does not, and without it startup
+# dies with "sqlite-exec-error: no such table: tables_used". The grep fails
+# the build early if a future package version moves the sed anchor.
+RUN npm install --no-save --ignore-scripts \
+        better-sqlite3-multiple-ciphers@${SQLITE_PKG_VERSION} node-gyp \
+    && sed -i "/'SQLITE_ENABLE_DBSTAT_VTAB',/a\\    'SQLITE_ENABLE_BYTECODE_VTAB'," \
+        node_modules/better-sqlite3-multiple-ciphers/deps/defines.gypi \
+    && grep -q SQLITE_ENABLE_BYTECODE_VTAB \
+        node_modules/better-sqlite3-multiple-ciphers/deps/defines.gypi \
+    && cd node_modules/better-sqlite3-multiple-ciphers \
+    && ../.bin/node-gyp rebuild \
+        --runtime=electron --target=${ELECTRON_VERSION_FOR_ABI} \
+        --dist-url=https://electronjs.org/headers --arch=x64 \
+    && cd /app \
     && mkdir -p /opt/native-linux \
     && cp node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node \
           /opt/native-linux/ \
