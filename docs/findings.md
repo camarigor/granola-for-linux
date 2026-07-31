@@ -83,6 +83,9 @@ Running `electron loader.js` against the extracted app, in the order they appear
 | 5 | `net::ERR_INSUFFICIENT_RESOURCES` | letting the original handler try first meant 322 failed fetches | serve from disk **before** delegating |
 | 6 | `better_sqlite3.node: invalid ELF header` | Mach-O binary; and the loader's require hook **does not reach the renderer**, which loads the `.node` itself | build the package against Electron headers and shadow it via bind-mount |
 | 7 | `this[cppdb].updateHook is not a function` | Granola ships a **fork** of better-sqlite3-multiple-ciphers exposing `updateHook`; no public version has it (checked 12.8.0 / 12.9.0 / 12.10.0 / 12.11.1, zero hits) | `stubs/sqlite-updatehook-shim.js` adds a no-op method to our build |
+| 8 | `sqlite-exec-error: no such table: tables_used` → React error boundary ("Something went wrong") | `tables_used()` is a SQLite **table-valued function** that only exists when compiled with `SQLITE_ENABLE_BYTECODE_VTAB` (sqlite.org/bytecodevtab.html). Granola's fork enables it; the public package does not. Their cacheStore feeds it every query to learn which tables are read/written (`wr` column) and pairs it with `updateHook` for reactive cache invalidation, the two fork features serve one system | the Dockerfile patches `deps/defines.gypi` before compiling (A/B-tested: same build fails without the flag, works with it) |
+| 9 | notes never generate; `update-document-panel` → **404 Document panel not found** | **the no-op `updateHook` from #7.** It is not cosmetic: `sqlite_worker/worker.js` uses it as the change-notification backbone (`updateHook(cb)` → `postMessage({type:'change', tables})` → `sqlite_process` fans out → query cache invalidated → UI re-reads). Mute, the app never learns local rows changed, so the panel is created locally but never registered server-side and the follow-up update 404s | `stubs/sqlite-updatehook-shim.js` now **implements** the hook: write statements report their tables via `tables_used()` (the #8 fix), matching the real `(op, database, table, rowid)` signature |
+| 10 | login and local notes lost on every restart | Electron's userData lived at `/home/electron-cache/.config/Electron` **inside** the container, with no volume | `run.sh` mounts `work/app-data` there |
 
 Details worth keeping:
 
@@ -97,31 +100,154 @@ Details worth keeping:
 - **A screenshot of a window under i3 is not evidence**: a window on a hidden
   workspace captures as pure black even when healthy. Validate through the log
   (`ERR_FAILED`, `Uncaught`) instead of the image.
+- **The window `error`/`unhandledrejection` listeners never fire**: the app
+  catches its own exceptions and routes them to a structured logger, which the
+  terminal flattens to `[object Object]`. The CDP tracer in `loader.js`
+  (`GRANOLA_TRACE_CONSOLE`) attaches `webContents.debugger`, listens for
+  `Runtime.consoleAPICalled` and expands object arguments via
+  `Runtime.callFunctionOn` + `JSON.stringify`. Bonus: `Runtime.enable` replays
+  messages logged before the attach, so early boot errors are not lost.
+- **Testing an Electron-ABI native module without a display**:
+  `ELECTRON_RUN_AS_NODE=1 /opt/electron/electron script.js` runs Electron as
+  plain Node with the right ABI, no Chromium, no X11. This is how the
+  `tables_used()` fix was A/B-verified inside a throwaway container.
 
 ### State at the end of Phase 1
 
-With all of the above applied, the app boots and the **UI renders** (Granola's
-own error screen is drawn, with correct typography, icons and buttons). The log
-shows the full startup chain succeeding:
+**Phase 1 complete.** With all of the above applied, the app boots to its real
+UI, the **login screen**, with no error boundary. The log shows the full
+chain succeeding:
 
 ```
 app-started {"wasFirstLaunch":true}      primary-window-created
 sqlite-init-success                      sqlite-migrate-success
-websocket-network-online-detected        window-opened
+renderer-startup-complete                navigate {"pathname":"/login"}
+transcription-set-desired-...            micApps is now []
 ```
+
+The transcription subsystem initialises, microphone-app detection runs, and
+integrations correctly report "no access token" for an unauthenticated session.
+Closing the window does **not** exit the process (macOS menu-bar behaviour).
+
+The only remaining startup error is non-blocking: `meet-consent-enable-failed`
+, the app looks for `/app/native/x64/meet-consent-host`, a macOS helper binary
+for the Google Meet consent flow (Phase 2 material).
 
 **No native stub has been called yet**, the UI mounts without touching the
 macOS modules. They should only come into play at login and, above all, when
 recording (Phase 2).
 
+## Phase 1.5, login (OAuth)
+
+The login button calls `shell.openExternal(authUrl)`. In the container there is
+no browser, so the loader writes the URL to a bridge directory and a watcher on
+the host opens it in the user's real browser (`GRANOLA_BRIDGE_DIR` /
+`scripts/run.sh`). Two obstacles found:
+
+| # | Symptom | Cause | Fix |
+|---|---|---|---|
+| 9 | login click does nothing | `shell.openExternal` runs `xdg-open`, absent in the container; the flow stalls at `/login-in-progress` | loader intercepts `openExternal`, writes URL to bridge; host watcher opens it |
+| 10 | auth page returns `{"message":"Internal Server Error"}` (HTTP 500) | `api.granola.ai/v1/auth` only accepts `platform=macos` or `platform=windows`. The app sends `process.platform` verbatim (`linux`) because its platform map has no Linux entry. **The backend 500s on any other value, even `darwin`** (bisected with curl 2026-07-31) | loader rewrites `platform=linux → macos` on `*.granola.ai` auth URLs. We run the genuine macOS bundle, so this is accurate |
+
+The corrected URL 302-redirects into the WorkOS flow requesting Google scopes:
+`userinfo.email`, `userinfo.profile`, `calendar.events`, `calendar.readonly`,
+with `redirect_uri=https://api.granola.ai/v1/login-complete`.
+
+### The deep-link return path
+
+The callback comes back as a `granola://` link the host browser cannot route
+into the container. The loader watches the bridge for `callback-*.url` files
+and re-emits them as the `open-url` event the app already listens on;
+`scripts/deliver-callback.sh` queues one (and converts the
+`granola.ai/app-redirect?...` URL from the address bar into the deep link).
+
+Read out of `dist-electron/main/index.js`:
+
+- Accepted schemes: **`granola:` and `granola-dev:`**, `dTt = app.isPackaged ? "granola" : "granola-dev"` only affects *registration*; the parser (`G7`) takes both, so running unpackaged is not a problem.
+- The action is the **hostname**, not the path: `granola://login-complete?code=…`.
+- Allowed actions: `login-complete`, `join-list`, `new-document`, `put-document`, `try-recipe`, `ws-migration-banner`, `open-workspace`, `open-document`, `open-settings`, `set-feature-flags`, `turbopuffer-search`, `zoom-redirect`, `start-demo`, `open`. Anything else logs `url-path-not-allowed`.
+- Query values `"true"`/`"false"` are coerced to booleans before schema validation.
+- `https://notes.granola.ai/...` links are handled by a separate parser (`ISt`).
+
+### Three ways the login fails (all diagnosed, none our bug)
+
+| Symptom | Cause | Rule |
+|---|---|---|
+| WorkOS **"Invalid state"** after logging in | the `state` is a JWT whose `exp - iat` is exactly **900 s**; a tab left sitting expires | complete the flow within 15 min of the tab opening |
+| Google **"Something went wrong"** | **two concurrent authorization requests** for the same sign-in (the app opened one, a second was opened by hand), AuthKit tracks the latest session on `auth.granola.ai` and the older one dies | exactly one tab per sign-in; let the app open it |
+| `login-complete-ignored-not-on-login-in-progress` | the renderer must be sitting on the `/login-in-progress` route when the callback lands | never restart or close the app between clicking and delivering |
+
+**Result: login works.** `auth-electron-set-tokens {"signInMethod":"CrossAppAuth"}`
+→ `navigate /` → `Preferences synced` → `Document lists metadata sync complete`
+→ `full-sync-complete`. **The backend accepts a non-official client**, no
+attestation, no platform check beyond the `/v1/auth` parameter above.
+
+## Phase 2, recording (mostly already working)
+
+The assumption was that recording required porting `granola.node`. It does not.
+The log says:
+
+```
+received-start-audio-capture {"sampleRate":16000,"capture_method":"browser"}
+```
+
+**There is a browser capture path**, Chromium's own APIs, no native module, 
+and it serves *both* sources. Two transcription handlers connect
+(`source: microphone`, `source: system`), both reach
+`transcription-first-buffer-sent-timestamp`, and both report latency from the
+providers (`assembly-universal`, `deepgram`). Recording, transcription and
+automatic note generation all work today on Linux.
+
+That matters for meeting apps: capture happens at the OS audio layer, so
+**Teams web, teams-for-linux, Zoom and Meet are all the same** to Granola. It
+records your microphone and the system output, never "from an app".
+
+The native module's remaining value:
+
+| Feature | Browser path | Needs `granola.node`? |
+|---|---|---|
+| Record mic + system audio | works | no |
+| Live transcription | works | no |
+| Automatic note generation | works | no |
+| Input device enumeration/selection | untested | probably |
+| Echo cancellation tuning (`disableEchoCancellationOnHeadphones`) | n/a | probably |
+| **Meeting auto-detection** (`micApps`: which apps hold the mic) | absent | yes, needs a PipeWire equivalent |
+
+The contract, read from `dist-electron/audio_process/index.js`, if it is ever
+implemented:
+
+```js
+$.startAudioCapture(useCoreAudio, disableEchoCancellationOnHeadphones,
+                    enableAutomaticGainCompensation, sampleRate,
+                    (microphoneBuffer, systemAudioBuffer, timestamps) => …)
+```
+
+Plus `stopAudioCapture`, `getInputDevices`, `setInputDevice`,
+`getAudioCaptureStatus`, `requestMicrophonePermission` and four callback
+setters. Buffers are mono 16-bit PCM; the app writes them as
+`<date>_microphone.wav` and `<date>_system.wav`.
+
+Two gifts in that file: the native library path arrives as **`process.argv[2]`**
+(so our own `.node` can be pointed at without patching the bundle), and the TCC
+permission gate is skipped off-macOS, `qKe()` returns
+`{audioCapture:'authorized', screenCapture:'authorized'}` when
+`process.platform !== 'darwin'`.
+
 ## Open questions
 
-1. **`sqlite-exec-error`**, the current blocker. SQLite initialises and migrates,
-   but one statement fails and the React error boundary shows "Something went
-   wrong". Likely tied to the same fork that provides `updateHook`. The renderer
-   error listeners in `loader.js` are installed to surface the real exception.
-2. **`granola.node` contract**, method names, arguments, audio buffer layout.
-   `stubs/modules/granola.js` logs every call to reveal it at runtime.
-3. **Backend attestation**, will the server accept a non-official client? Still
-   unanswered: the app has not reached a successful login yet.
-4. **Where diarisation runs**, locally (`speaker_embedding_process`) or server-side.
+1. **`granola.node` contract**, method names, arguments, audio buffer layout.
+   `stubs/modules/granola.js` logs every call to reveal it at runtime. This is
+   the whole of Phase 2: audio capture via PipeWire.
+2. **Where diarisation runs**, locally (`speaker_embedding_process`) or server-side.
+3. **`meet-consent-host`**, a native messaging host the app installs for its
+   Chrome extensions. Needs a Linux replacement (or a clean disable) in Phase 2.
+4. **Registering `granola://` on the host**, a `.desktop` entry with
+   `MimeType=x-scheme-handler/granola` would let the browser hand the callback
+   back automatically, removing the copy-paste step. Belongs in the `.deb`
+   (which owns host integration); the container flow keeps using
+   `scripts/deliver-callback.sh`.
+
+### Answered
+
+- **Backend attestation**, *yes, the server accepts a non-official client.*
+  Full login and sync completed from the container on 2026-07-31.

@@ -27,13 +27,25 @@ third implementation of the native layer (macOS → Windows → Linux).
 
 ## Status
 
-**Phase 1 (app boots), largely working.** The window opens, the UI renders,
-SQLite initialises and migrates, and the websocket connects. The app currently
-stops at its own error screen, triggered by a `sqlite-exec-error`; see
-`docs/findings.md` for the full chain and the next thread to pull.
+**Phase 1 (app boots), done.** The window opens, the UI renders, SQLite
+initialises and migrates, and the app reaches its login screen with no errors.
 
-**Phase 2 (recording), not started.** Requires implementing `granola.node`
-for Linux (PipeWire capture) against the contract the JS expects.
+**Phase 1.5 (login), done.** Google sign-in completes and the account syncs
+(preferences, document lists). The backend accepts a non-official client. Two
+shims make it work: the loader bridges `shell.openExternal` out to the host
+browser, and re-injects the `granola://` callback the browser cannot route back.
+
+**Phase 2 (recording), works.** Recording, live transcription and automatic
+note generation all run on Linux. The app turned out to have a browser-based
+capture path (`capture_method: browser`) covering both the microphone and
+system audio, so porting `granola.node` was not required. Because capture
+happens at the OS audio layer, Teams, Zoom and Meet are all equivalent.
+
+**Phase 3 (packaging), next.** Ship the `.deb`, register the `granola://`
+scheme so login needs no manual step, and add meeting auto-detection
+(a PipeWire equivalent of the macOS "which apps hold the microphone" monitor).
+
+See `docs/findings.md` for every obstacle, its cause and its fix.
 
 ## Requirements
 
@@ -56,6 +68,25 @@ for Linux (PipeWire capture) against the contract the JS expects.
 # 4. launch with stubs applied (window via the host X11)
 ./scripts/run.sh
 ```
+
+### Signing in
+
+`run.sh` opens auth URLs in your host browser automatically. The callback
+cannot come back on its own (the host has no `granola://` handler), so hand it
+over once, while the app is still waiting on its "signing in" screen:
+
+```bash
+./scripts/deliver-callback.sh '<URL from the address bar on the "Opening Granola..." page>'
+```
+
+Three rules, each learned the hard way (see `docs/findings.md`):
+
+- **One tab per sign-in.** A second concurrent flow makes Google fail with
+  "Something went wrong".
+- **Within 15 minutes.** The auth `state` is a JWT with a 900 s lifetime; past
+  that WorkOS answers "Invalid state".
+- **Do not close or restart the app** in between, the callback is only
+  accepted while the renderer sits on `/login-in-progress`.
 
 ## Usage, .deb package
 
