@@ -233,6 +233,52 @@ permission gate is skipped off-macOS, `qKe()` returns
 `{audioCapture:'authorized', screenCapture:'authorized'}` when
 `process.platform !== 'darwin'`.
 
+## Phase 3, packaging
+
+Everything that works in the dev container has to survive being installed, and
+two defects only existed on that side.
+
+| # | Symptom | Cause | Fix |
+|---|---|---|---|
+| 11 | login could never start from a .deb install | the `platform=linux → macos` rewrite sat inside the container-only bridge block, so an installed app would send the value that makes `api.granola.ai/v1/auth` answer 500 | the rewrite applies to every install; only the bridge detour stays conditional |
+| 12 | **second** launch hangs before the window opens (`Failed to start service worker`, then a storage IO error) | the app installs React and Redux DevTools on every start, having read an unpackaged Electron as a development environment. Harmless while userData died with the container, fatal once it persists (obstacle #10) | the loader refuses those extensions by id, and logs any other extension load instead of silently allowing it |
+
+Note the shape of both: invisible in development, certain in production. One
+came from a configuration difference (no bridge), the other from a lifecycle
+difference (state that now survives). Packaging exposed them, not coding.
+
+### Debian packaging
+
+Following the Debian developers' reference, plus one thing it does not cover.
+
+**Dependencies were unsatisfiable on the target machine.** Six libraries were
+declared under names that no longer exist on Ubuntu 24.04, renamed by the
+`t64` transition (`libasound2` → `libasound2t64`, likewise `libatk1.0-0`,
+`libatk-bridge2.0-0`, `libcups2`, `libgtk-3-0`), and `p7zip-full` has been
+replaced by `7zip`. Each is now declared as an alternative
+(`libasound2t64 | libasound2`) so the package installs on both current Ubuntu
+and stable Debian. Verified with `apt-get install -s`.
+
+**From the reference itself:**
+
+- The synopsis is a phrase, not a sentence: no leading article, no final full
+  stop, around 50 characters.
+- The extended description is full sentences whose first paragraph answers what
+  the package does and what task it helps with, so it opens by explaining what
+  Granola is, since the reader may not know. It contains no question, which the
+  reference forbids outright.
+- Maintainer scripts "must be idempotent", and removal, double installation and
+  purge all have to be tested. A `postrm` was missing entirely: without it the
+  `granola://` registration kept pointing at an uninstalled package. Neither
+  script creates a file, so purge is clean by construction.
+- `desktop-file-utils` moved from `Suggests` to `Recommends`: without it the
+  scheme handler is never registered and signing in needs a manual step again.
+
+**Not shipped, taken from the user's own copy:** the icon. The `.desktop` entry
+names one the package has no right to distribute, so the launcher lifts
+`granola_app_icon-*.png` out of the extracted app on first run (the asset name
+carries a content hash, hence the glob).
+
 ## Open questions
 
 1. **`granola.node` contract**, method names, arguments, audio buffer layout.

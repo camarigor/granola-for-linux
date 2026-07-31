@@ -1,11 +1,15 @@
 #!/bin/sh
-# Register the granola:// scheme handler so the OAuth callback reaches the app.
+# Register the granola:// scheme handler so the OAuth callback reaches the app
+# instead of dead-ending in the browser. Idempotent, and a missing
+# desktop-file-utils is not an error: it is only a Recommends.
 set -e
 
-if [ "$1" = "configure" ]; then
-    if command -v update-desktop-database >/dev/null 2>&1; then
-        update-desktop-database -q /usr/share/applications || true
-    fi
-fi
+case "$1" in
+    configure)
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+        fi
+        ;;
+esac
 
 exit 0

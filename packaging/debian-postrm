@@ -1,0 +1,15 @@
+#!/bin/sh
+# Refresh the MIME cache so the granola:// handler stops pointing at a package
+# that is no longer installed. Idempotent, and a missing desktop-file-utils is
+# not an error: it is only a Recommends.
+set -e
+
+case "$1" in
+    remove|purge)
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+        fi
+        ;;
+esac
+
+exit 0

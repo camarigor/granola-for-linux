@@ -20,7 +20,11 @@ docker run --rm \
     -v "$ROOT:/src:ro" -v "$OUT:/out" \
     node:22-slim bash -euo pipefail -c '
 apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-    unzip curl dpkg-dev fakeroot python3 make g++ >/dev/null
+    ca-certificates unzip curl dpkg-dev fakeroot python3 make g++ >/dev/null
+# Without apt-utils the postinst scripts are deferred, so ca-certificates never
+# generates its bundle and every https fetch dies with
+# "curl: (77) error setting certificate file". Generate it explicitly.
+update-ca-certificates >/dev/null 2>&1 || true
 
 PKG=/tmp/pkg
 PREFIX=$PKG/opt/granola-for-linux
@@ -51,13 +55,20 @@ install -m 755 /src/packaging/granola-for-linux "$PKG/usr/bin/granola-for-linux"
 install -m 644 /src/packaging/granola-for-linux.desktop "$PKG/usr/share/applications/"
 install -m 644 /src/packaging/debian-control "$PKG/DEBIAN/control"
 install -m 755 /src/packaging/debian-postinst "$PKG/DEBIAN/postinst"
+install -m 755 /src/packaging/debian-postrm "$PKG/DEBIAN/postrm"
 sed -i "s/^Version:.*/Version: ${VERSION}/" "$PKG/DEBIAN/control"
 
-SIZE=$(du -sk "$PKG" | cut -f1)
+# Installed-Size counts the unpacked payload only, and is in KiB.
+SIZE=$(du -sk --exclude=DEBIAN "$PKG" | cut -f1)
 echo "Installed-Size: ${SIZE}" >> "$PKG/DEBIAN/control"
 
 echo "[deb] packaging ..."
 fakeroot dpkg-deb --build "$PKG" "/out/granola-for-linux_${VERSION}_amd64.deb" >/dev/null
+
+echo "[deb] checking the result ..."
+dpkg-deb --info "/out/granola-for-linux_${VERSION}_amd64.deb" | sed -n "1,40p"
+# lintian is not available here, but dpkg-deb parsing the control file is
+# already enough to catch a malformed Depends line or a broken description.
 chown "${UID}:${UID}" "/out/granola-for-linux_${VERSION}_amd64.deb"
 '
 
