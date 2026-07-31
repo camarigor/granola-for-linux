@@ -153,6 +153,11 @@ The corrected URL 302-redirects into the WorkOS flow requesting Google scopes:
 `userinfo.email`, `userinfo.profile`, `calendar.events`, `calendar.readonly`,
 with `redirect_uri=https://api.granola.ai/v1/login-complete`.
 
+**Both providers work.** `provider=microsoft` takes the same route, the
+endpoint redirects it to `MicrosoftOAuth` instead of `GoogleOAuth`, so the
+platform rewrite and the scheme handler cover Microsoft sign-in unchanged.
+Verified 2026-07-31.
+
 ### The deep-link return path
 
 The callback comes back as a `granola://` link the host browser cannot route
