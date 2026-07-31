@@ -6,7 +6,10 @@
 *.dmg
 *.asar
 *.node
-work/            # workspace: extracted app, unpacked asar
+# workspace: extracted app, unpacked asar, local native builds
+# (gitignore has no inline comments, a trailing "# ..." on a pattern line
+# becomes part of the pattern and silently disables it)
+work/
 app-src/
 Granola/
 Granola.app/
