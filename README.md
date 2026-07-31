@@ -85,6 +85,14 @@ Every obstacle met along the way, with its cause and fix, is written up in
 
 ## Install, the recommended path
 
+There are two independent ways to run this, and you only need one. The `.deb`
+installs everything on your system and needs no Docker at all. The container
+below is an alternative for trying it without installing anything, and it is
+where the port was developed.
+
+For daily use, install the package. Signing in there takes no manual step,
+which is not true in the container.
+
 ### 1. Get the package
 
 Download `granola-for-linux_*_amd64.deb` from the releases page, or build it
@@ -168,6 +176,9 @@ Removing the package leaves the last two in place. Delete them by hand if you
 want them gone.
 
 ## Run with Docker
+
+**Skip this section if you installed the `.deb`.** It is a separate way of
+running the same thing, not an extra step.
 
 The container needs no installation on the host beyond Docker itself, because
 Electron, Node and the toolchain all live in the image. This is how the port
