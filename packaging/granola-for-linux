@@ -8,18 +8,24 @@ set -euo pipefail
 PREFIX=/opt/granola-for-linux
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}/granola-for-linux"
 APP="$DATA/app-src"
+SQLITE_PKG="node_modules/better-sqlite3-multiple-ciphers"
+MARKER=".granola-for-linux"
 
 die() { echo "granola-for-linux: $*" >&2; exit 1; }
 
 # -- first run: needs the .dmg ------------------------------------------------
 if [[ ! -d "$APP" ]]; then
     DMG="${1:-}"
-    if [[ -z "$DMG" ]]; then
+    # Consume the argument only if it really is the .dmg; anything else (a
+    # granola:// callback, an Electron flag) has to reach the app untouched.
+    if [[ -n "$DMG" && "$DMG" == *.dmg ]]; then
+        shift
+    else
         # try the obvious locations first
         DMG=$(ls -t "$HOME"/Downloads/*ranola*.dmg "$HOME"/Downloads/*.dmg 2>/dev/null | head -1 || true)
     fi
     [[ -n "$DMG" && -f "$DMG" ]] || die "first run needs the official .dmg:
-    granola-for-linux /caminho/para/'Granola - AI Notepad.dmg'
+    granola-for-linux /path/to/'Granola - AI Notepad.dmg'
   (download it from https://www.granola.ai/download - this package does not ship it)"
 
     command -v 7z >/dev/null || die "7z missing (apt install p7zip-full)"
@@ -36,9 +42,23 @@ if [[ ! -d "$APP" ]]; then
     echo "granola-for-linux: app extracted to $APP"
 fi
 
+# -- swap in the Linux SQLite module ------------------------------------------
+# The bundle ships a Mach-O build, which fails here with "invalid ELF header";
+# and even a stock Linux build would be missing the two features Granola's
+# private fork provides (see scripts/build-sqlite.sh). Only the extracted copy
+# is touched - the user's .dmg is never modified - and the marker makes this
+# re-apply automatically after a Granola update is extracted afresh.
+if [[ -d "$APP/$SQLITE_PKG" && ! -f "$APP/$SQLITE_PKG/$MARKER" ]]; then
+    echo "granola-for-linux: installing the Linux sqlite module ..."
+    rm -rf "$APP/$SQLITE_PKG"
+    cp -r "$PREFIX/native/better-sqlite3-multiple-ciphers" "$APP/$SQLITE_PKG"
+    touch "$APP/$SQLITE_PKG/$MARKER"
+fi
+
 # -- run ----------------------------------------------------------------------
 export GRANOLA_APP_DIR="$APP"
+export GRANOLA_STUBS_DIR="$PREFIX/stubs"
+export GRANOLA_LINUX_NATIVE="$PREFIX/native/better-sqlite3-multiple-ciphers/build/Release"
 export GRANOLA_STUB_VERBOSE="${GRANOLA_STUB_VERBOSE:-0}"
 
-exec "$PREFIX/electron/electron" "$PREFIX/stubs/loader.js" \
-    --no-sandbox "${@:2}"
+exec "$PREFIX/electron/electron" "$PREFIX/stubs/loader.js" --no-sandbox "$@"

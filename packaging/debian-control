@@ -5,13 +5,17 @@ Priority: optional
 Architecture: amd64
 Maintainer: camarigor <igor@marques-it.tech>
 Depends: p7zip-full, libnss3, libatk1.0-0, libatk-bridge2.0-0, libcups2, libdrm2, libxkbcommon0, libxcomposite1, libxdamage1, libxfixes3, libxrandr2, libgbm1, libasound2, libpango-1.0-0, libcairo2, libgtk-3-0, libgl1, libglx-mesa0, libegl1
+Suggests: desktop-file-utils
 Homepage: https://forgejo.tinfoilhat.work/camarigor/granola-for-linux
 Description: Run the Granola client (macOS/Electron) on Linux
- Ships the Electron runtime plus the stubs for the macOS native modules needed
- to load the Granola client on Linux.
+ Ships the Electron runtime, the stubs that stand in for the macOS native
+ modules, and a SQLite build carrying the two features Granola's private fork
+ relies on.
  .
  This package does NOT distribute Granola. On first run it extracts the app from
  the official .dmg that the user downloaded from granola.ai.
  .
- Status: Phase 1 (the interface loads). Audio capture depends on a native module
- that has not been ported yet - see docs/findings.md in the repository.
+ Sign-in, recording, live transcription and automatic note generation all work.
+ Meeting auto-detection does not: it depends on a macOS API that reports which
+ applications hold the microphone, and no Linux equivalent is implemented yet.
+ See docs/findings.md in the repository.

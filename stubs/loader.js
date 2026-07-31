@@ -190,6 +190,42 @@ if (process.env.GRANOLA_TRACE_PROTOCOL !== "0") {
   }
 }
 
+// Seeing an unpackaged Electron, the app decides it is in development and
+// installs React and Redux DevTools on every launch. They are development
+// tooling with no place in a user's install, they add a network download to
+// boot, and once their state has persisted in userData, their service worker
+// fails to start ("Failed to start service worker", "Database IO error") and
+// the app hangs before it ever opens a window. Refusing the load costs nothing
+// and removes a startup dependency; set GRANOLA_DEVTOOLS=1 to allow it.
+if (process.env.GRANOLA_DEVTOOLS !== "1") {
+  try {
+    const { app: electronApp, session } = require("electron");
+    const DEVTOOLS_IDS = new Set([
+      "fmkadmapgofadopljbjfkapdkoienihi", // React Developer Tools
+      "gbhkbghipadpgpmjeflhomdanpgnhoge", // React Developer Tools (current build)
+      "lmhkpmbekcpmknklioeibfkpmmfibljd", // Redux DevTools
+    ]);
+    electronApp.whenReady().then(() => {
+      const extensions = session.defaultSession.extensions;
+      if (!extensions || typeof extensions.loadExtension !== "function") return;
+      const originalLoad = extensions.loadExtension.bind(extensions);
+      extensions.loadExtension = async (dir, opts) => {
+        const id = path.basename(String(dir));
+        if (!DEVTOOLS_IDS.has(id)) {
+          // Not one of ours to block, let it through, but say so, because the
+          // app is not otherwise expected to load Electron extensions.
+          log(`allowing unexpected extension: ${id}`);
+          return originalLoad(dir, opts);
+        }
+        log(`blocked devtools extension: ${id}`);
+        return { id, name: "blocked-by-granola-for-linux", path: String(dir), manifest: {} };
+      };
+    });
+  } catch (err) {
+    log("could not instrument extension loading:", err.message);
+  }
+}
+
 // Log network failures with URL and reason. The app only reports
 // "network-error [object Object]" to its console, which says nothing.
 if (process.env.GRANOLA_TRACE_NET !== "0") {
@@ -243,46 +279,52 @@ if (process.env.GRANOLA_TRACE_ERRORS !== "0") {
   }
 }
 
-// shell.openExternal dies silently in the container: there is no browser and
-// no xdg-open (the log shows a bare "xdg-open" line and the login flow stops
-// at /login-in-progress). Drop the URL into the bridge directory instead, 
-// run.sh watches it on the host and opens the user's real browser, where
-// their Google session lives.
+// shell.openExternal always needs fixing up, in two independent ways.
+//
+// 1. Every install: api.granola.ai/v1/auth answers HTTP 500 for any `platform`
+//    other than macos or windows, darwin and linux both fail (bisected with
+//    curl on 2026-07-31). The app sends process.platform verbatim because its
+//    platform map has no Linux entry. We run the genuine macOS bundle, so
+//    presenting it as macos is accurate, and without this login cannot start.
+//
+// 2. Container only: there is no browser and no xdg-open inside it, so the
+//    call dies silently and the flow stalls at /login-in-progress. The URL goes
+//    to a bridge directory that run.sh watches on the host, opening the user's
+//    real browser where their Google session lives. Installed from the .deb
+//    there is no bridge and the normal openExternal does the right thing.
 const BRIDGE_DIR = process.env.GRANOLA_BRIDGE_DIR;
-if (BRIDGE_DIR) {
-  try {
-    const { shell } = require("electron");
-    const originalOpenExternal = shell.openExternal.bind(shell);
-    let openSeq = 0;
-    shell.openExternal = async (url) => {
-      let target = String(url);
-      // api.granola.ai/v1/auth 500s on any platform value other than
-      // macos/windows (bisected 2026-07-31: linux/darwin/mac -> 500). The app
-      // sends process.platform verbatim when its map has no entry. We run the
-      // genuine macOS bundle, so present it as such.
-      try {
-        const u = new URL(target);
-        if (u.hostname.endsWith("granola.ai") && u.searchParams.get("platform") === "linux") {
-          u.searchParams.set("platform", "macos");
-          target = u.toString();
-          console.log("[stub:open-external] rewrote platform=linux -> macos (backend 500s on unknown values)");
-        }
-      } catch { /* not a parseable URL, pass through as-is */ }
-      console.log(`[stub:open-external] ${target}`);
-      try {
-        // two-step write so the host watcher never reads a half-written file
-        const base = path.join(BRIDGE_DIR, `open-${process.pid}-${openSeq++}`);
-        fs.writeFileSync(`${base}.tmp`, target);
-        fs.renameSync(`${base}.tmp`, `${base}.url`);
-      } catch (err) {
-        console.warn("[stub:open-external] bridge write failed:", err.message);
-        return originalOpenExternal(target);
+try {
+  const { shell } = require("electron");
+  const originalOpenExternal = shell.openExternal.bind(shell);
+  let openSeq = 0;
+
+  shell.openExternal = async (url) => {
+    let target = String(url);
+    try {
+      const u = new URL(target);
+      if (u.hostname.endsWith("granola.ai") && u.searchParams.get("platform") === "linux") {
+        u.searchParams.set("platform", "macos");
+        target = u.toString();
+        console.log("[stub:open-external] rewrote platform=linux -> macos (backend 500s on unknown values)");
       }
-    };
-    log(`openExternal -> bridge at ${BRIDGE_DIR}`);
-  } catch (err) {
-    log("could not instrument shell.openExternal:", err.message);
-  }
+    } catch { /* not a parseable URL, pass through as-is */ }
+
+    console.log(`[stub:open-external] ${target}`);
+    if (!BRIDGE_DIR) return originalOpenExternal(target);
+
+    try {
+      // two-step write so the host watcher never reads a half-written file
+      const base = path.join(BRIDGE_DIR, `open-${process.pid}-${openSeq++}`);
+      fs.writeFileSync(`${base}.tmp`, target);
+      fs.renameSync(`${base}.tmp`, `${base}.url`);
+    } catch (err) {
+      console.warn("[stub:open-external] bridge write failed:", err.message);
+      return originalOpenExternal(target);
+    }
+  };
+  log(BRIDGE_DIR ? `openExternal -> bridge at ${BRIDGE_DIR}` : "openExternal -> host browser");
+} catch (err) {
+  log("could not instrument shell.openExternal:", err.message);
 }
 
 // Surface how the OAuth callback is expected to arrive. On macOS the deep

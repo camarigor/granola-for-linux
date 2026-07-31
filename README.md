@@ -97,9 +97,14 @@ granola-for-linux ~/Downloads/"Granola - AI Notepad.dmg"   # first run only
 ```
 
 After the first run, `granola-for-linux` or the **Granola (Linux)** menu entry is
-enough. The `.deb` ships the Electron runtime and our stubs; the Granola app is
-extracted from your `.dmg` into `~/.local/share/granola-for-linux/` and never goes
-into the package.
+enough. The `.deb` ships the Electron runtime, our stubs and the Linux SQLite
+module; the Granola app is extracted from your `.dmg` into
+`~/.local/share/granola-for-linux/` and never goes into the package.
+
+The SQLite module is swapped into the extracted copy on first launch (the
+bundle's own is a macOS binary, and a stock Linux build would still be missing
+what Granola's private fork adds). A marker file makes that re-apply by itself
+whenever a newer Granola is extracted.
 
 ## Layout
 

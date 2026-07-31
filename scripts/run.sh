@@ -19,34 +19,23 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "ERROR: run ./scripts/bu
 XSOCK=/tmp/.X11-unix
 XAUTH_HOST="${XAUTHORITY:-$HOME/.Xauthority}"
 
-# The loader's require hook only covers the main process; the renderer loads
-# .node files on its own. We shadow the macOS binary with the Linux build via
-# bind-mount - the app on the host disk stays untouched.
+# The loader's require hook only covers the main process; the renderer and the
+# sqlite worker load .node files themselves. We shadow the macOS binary with the
+# Linux build via bind-mount - the app on the host disk stays untouched.
 NATIVE_DIR="$WORK/native-linux"
 SQLITE_PKG="node_modules/better-sqlite3-multiple-ciphers"
 # We shadow the WHOLE PACKAGE (JS + .node), not just the binary: the JS wrapper
 # and the native addon share a per-version internal contract. Mixing the
 # bundle's JS (12.9.0) with a newer .node breaks with
 # "this[cppdb].updateHook is not a function".
+# The image already built it with tables_used() enabled and the updateHook shim
+# wired in (scripts/build-sqlite.sh); we only need a copy to mount.
 if [[ ! -d "$NATIVE_DIR/better-sqlite3-multiple-ciphers" ]]; then
     echo "[run] extracting Linux sqlite build from the image ..."
     mkdir -p "$NATIVE_DIR"
     cid=$(docker create "$IMAGE")
     docker cp "$cid:/app/node_modules/better-sqlite3-multiple-ciphers" "$NATIVE_DIR/" >/dev/null
     docker rm "$cid" >/dev/null
-
-    # Granola ships a fork exposing db.updateHook(), absent from the public package.
-    # We inject the method into OUR build (not the app) so startup can proceed.
-    cat >> "$NATIVE_DIR/better-sqlite3-multiple-ciphers/lib/index.js" <<'SHIM'
-
-// --- granola-for-linux: ver stubs/sqlite-updatehook-shim.js ---
-try {
-  require('/app/stubs/sqlite-updatehook-shim.js')(module.exports);
-} catch (err) {
-  console.warn('[granola-for-linux] updateHook shim not applied:', err.message);
-}
-SHIM
-    echo "[run] updateHook shim applied to the local sqlite build"
 fi
 
 SQLITE_MOUNT=()
@@ -97,6 +86,7 @@ docker run --rm ${DOCKER_TTY:--it} \
     -e GRANOLA_APP_DIR=/app/granola \
     -v "$APP:/app/granola" \
     -v "$ROOT/stubs:/app/stubs:ro" \
+    -e GRANOLA_STUBS_DIR=/app/stubs \
     -e GRANOLA_BRIDGE_DIR=/app/bridge \
     -v "$BRIDGE_DIR:/app/bridge" \
     -v "$DATA_DIR:$CONTAINER_DATA_DIR" \

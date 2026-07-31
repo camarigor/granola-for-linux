@@ -21,28 +21,14 @@ WORKDIR /app
 # it against the Electron headers; the loader redirects the require.
 ARG SQLITE_PKG_VERSION=12.11.1
 ARG ELECTRON_VERSION_FOR_ABI=42.7.0
-# Install with --ignore-scripts (download only), patch SQLite's compile-time
-# options, then compile once with node-gyp called directly, its CLI flags DO
-# reach the build (npm install is what fails to forward them).
-#
-# SQLITE_ENABLE_BYTECODE_VTAB: Granola's cacheStore queries tables_used(), a
-# SQLite table-valued function that only exists under this flag. Their private
-# sqlite fork enables it; the public package does not, and without it startup
-# dies with "sqlite-exec-error: no such table: tables_used". The grep fails
-# the build early if a future package version moves the sed anchor.
-RUN npm install --no-save --ignore-scripts \
-        better-sqlite3-multiple-ciphers@${SQLITE_PKG_VERSION} node-gyp \
-    && sed -i "/'SQLITE_ENABLE_DBSTAT_VTAB',/a\\    'SQLITE_ENABLE_BYTECODE_VTAB'," \
-        node_modules/better-sqlite3-multiple-ciphers/deps/defines.gypi \
-    && grep -q SQLITE_ENABLE_BYTECODE_VTAB \
-        node_modules/better-sqlite3-multiple-ciphers/deps/defines.gypi \
-    && cd node_modules/better-sqlite3-multiple-ciphers \
-    && ../.bin/node-gyp rebuild \
-        --runtime=electron --target=${ELECTRON_VERSION_FOR_ABI} \
-        --dist-url=https://electronjs.org/headers --arch=x64 \
-    && cd /app \
+# The recipe lives in scripts/build-sqlite.sh so the .deb builds it identically.
+COPY scripts/build-sqlite.sh /usr/local/bin/build-sqlite.sh
+RUN chmod +x /usr/local/bin/build-sqlite.sh \
+    && SQLITE_PKG_VERSION=${SQLITE_PKG_VERSION} \
+       ELECTRON_VERSION_FOR_ABI=${ELECTRON_VERSION_FOR_ABI} \
+       build-sqlite.sh /app/node_modules \
     && mkdir -p /opt/native-linux \
-    && cp node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node \
+    && cp /app/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node \
           /opt/native-linux/ \
     && test -f /opt/native-linux/better_sqlite3.node
 

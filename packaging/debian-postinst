@@ -1,0 +1,11 @@
+#!/bin/sh
+# Register the granola:// scheme handler so the OAuth callback reaches the app.
+set -e
+
+if [ "$1" = "configure" ]; then
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database -q /usr/share/applications || true
+    fi
+fi
+
+exit 0

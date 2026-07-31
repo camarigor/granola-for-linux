@@ -8,7 +8,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-0.1.0}"
-ELECTRON_VERSION="${ELECTRON_VERSION:-32.2.7}"
+# Must match the Electron the Granola bundle was built for: the native SQLite
+# module is compiled against this ABI, and the app's own code assumes it.
+ELECTRON_VERSION="${ELECTRON_VERSION:-42.7.0}"
 OUT="$ROOT/dist"
 
 mkdir -p "$OUT"
@@ -18,17 +20,23 @@ docker run --rm \
     -v "$ROOT:/src:ro" -v "$OUT:/out" \
     node:22-slim bash -euo pipefail -c '
 apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-    unzip curl dpkg-dev fakeroot >/dev/null
+    unzip curl dpkg-dev fakeroot python3 make g++ >/dev/null
 
 PKG=/tmp/pkg
 PREFIX=$PKG/opt/granola-for-linux
-mkdir -p "$PREFIX"/{stubs,bin} "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/applications"
+mkdir -p "$PREFIX"/{stubs,bin,native} "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/applications"
 
 echo "[deb] downloading electron ${ELECTRON_VERSION} ..."
 curl -fsSL -o /tmp/electron.zip \
   "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
 mkdir -p "$PREFIX/electron" && unzip -q /tmp/electron.zip -d "$PREFIX/electron"
 chmod +x "$PREFIX/electron/electron"
+
+# The bundle ships a macOS (Mach-O) better-sqlite3-multiple-ciphers, and the
+# public package is missing two features Granola'"'"'s private fork provides. Same
+# recipe as the dev container - see scripts/build-sqlite.sh.
+echo "[deb] building the Linux sqlite module ..."
+ELECTRON_VERSION_FOR_ABI="${ELECTRON_VERSION}" bash /src/scripts/build-sqlite.sh "$PREFIX/native"
 
 echo "[deb] installing asar (to unpack the user app.asar) ..."
 npm install --no-save --silent --prefix "$PREFIX/bin" @electron/asar >/dev/null
@@ -42,6 +50,7 @@ cp -r /src/stubs/. "$PREFIX/stubs/"
 install -m 755 /src/packaging/granola-for-linux "$PKG/usr/bin/granola-for-linux"
 install -m 644 /src/packaging/granola-for-linux.desktop "$PKG/usr/share/applications/"
 install -m 644 /src/packaging/debian-control "$PKG/DEBIAN/control"
+install -m 755 /src/packaging/debian-postinst "$PKG/DEBIAN/postinst"
 sed -i "s/^Version:.*/Version: ${VERSION}/" "$PKG/DEBIAN/control"
 
 SIZE=$(du -sk "$PKG" | cut -f1)
